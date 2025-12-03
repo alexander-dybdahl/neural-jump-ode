@@ -97,7 +97,7 @@ def plot_single_trajectory_with_condexp(
             times_full, X_full, obs_times, process_params.get("mu", 0.0)
         )
     
-    # Build model prediction on full grid
+    # Build model prediction on full grid by simulating the NJ-ODE dynamics
     model.eval()
     device = next(model.parameters()).device
     
@@ -105,19 +105,63 @@ def plot_single_trajectory_with_condexp(
     obs_times_tensor = obs_times.to(device)
     obs_values_tensor = obs_values.unsqueeze(-1).to(device)  # Add feature dimension
     
-    # Get model predictions at observation times
-    with torch.no_grad():
-        preds, _ = model([obs_times_tensor], [obs_values_tensor])
-        model_obs = preds[0].squeeze(-1).cpu()  # Remove feature dimension
-    
-    # Build model path on full grid without seeing the future:
-    # use the last model prediction at or before each time
+    # We will build model_full by explicitly simulating the NJ-ODE on times_full
     model_full = torch.zeros_like(times_full)
-    for i, t in enumerate(times_full):
-        # index of latest observation time <= t
-        idx = torch.searchsorted(obs_times, t, right=True) - 1
-        idx = torch.clamp(idx, min=0, max=len(obs_times) - 1)
-        model_full[i] = model_obs[idx]
+    times_full_device = times_full.to(device)
+    
+    with torch.no_grad():
+        # Loop over intervals between observations
+        for i in range(len(obs_times) - 1):
+            T_i = obs_times[i]
+            T_next = obs_times[i + 1]
+            x_i = obs_values[i].unsqueeze(0).unsqueeze(-1).to(device)  # (1, 1)
+            
+            # Jump at T_i
+            h = model.jump_nn(x_i)
+            t_cur = T_i.to(device)
+            
+            # Indices of fine times in [T_i, T_next]
+            mask = (times_full >= T_i) & (times_full <= T_next)
+            ts_interval = times_full_device[mask]
+            idx_interval = torch.where(mask)[0]
+            
+            for j, t_target in enumerate(ts_interval):
+                # Integrate from t_cur to t_target using Euler (with n_steps_between substeps)
+                n_sub = max(1, model.n_steps_between)
+                dt = (t_target - t_cur) / float(n_sub)
+                for _ in range(n_sub):
+                    t_new = t_cur + dt
+                    h = model.euler_step(h, x_i, t_cur, t_new)
+                    t_cur = t_new
+                
+                y_t = model.output_nn(h)  # (1, 1)
+                model_full[idx_interval[j]] = y_t.squeeze().cpu()
+        
+        # Handle times after the last observation
+        if len(obs_times) > 0:
+            T_last = obs_times[-1]
+            x_last = obs_values[-1].unsqueeze(0).unsqueeze(-1).to(device)  # (1, 1)
+            
+            # Jump at T_last
+            h = model.jump_nn(x_last)
+            t_cur = T_last.to(device)
+            
+            # Indices of fine times > T_last
+            mask = times_full > T_last
+            ts_interval = times_full_device[mask]
+            idx_interval = torch.where(mask)[0]
+            
+            for j, t_target in enumerate(ts_interval):
+                # Integrate from t_cur to t_target
+                n_sub = max(1, model.n_steps_between)
+                dt = (t_target - t_cur) / float(n_sub)
+                for _ in range(n_sub):
+                    t_new = t_cur + dt
+                    h = model.euler_step(h, x_last, t_cur, t_new)
+                    t_cur = t_new
+                
+                y_t = model.output_nn(h)  # (1, 1)
+                model_full[idx_interval[j]] = y_t.squeeze().cpu()
     
     # Create the plot
     plt.figure(figsize=(12, 8))
