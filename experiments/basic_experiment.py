@@ -33,7 +33,7 @@ def main():
         
         # Training parameters
         "learning_rate": 0.001,
-        "n_epochs": 200,
+        "n_epochs": 1000,
         "print_every": 20,
         "device": "auto",
         

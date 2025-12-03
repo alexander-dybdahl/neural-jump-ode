@@ -33,9 +33,9 @@ class ODEFunc(nn.Module):
         # t, t_last: scalar tensors
         # h: (batch, d_h)
         # x_last: (batch, d_x)
-        dt = (t - t_last).expand_as(h[..., :1])
+        t_elapsed = (t - t_last).expand_as(h[..., :1])
         t_rel = (t_last).expand_as(h[..., :1])
-        inp = torch.cat([h, x_last, t_rel, dt], dim=-1)
+        inp = torch.cat([h, x_last, t_rel, t_elapsed], dim=-1)
         dh = self.net(inp)
         return dh
 
@@ -167,9 +167,14 @@ def nj_ode_loss(batch_times, batch_values, preds, preds_before):
         # x: (n_i, d_x), y: (n_i, d_x), y_before: (n_i, d_x)
         # "jump part": x - y
         # "continuous part": y - y_before
-        jump_err = x - y
-        cont_err = y - y_before
-        # sum over time indices and dimensions
-        err = (jump_err.abs() + cont_err.abs()).pow(2).mean()
+
+        jump = (x - y)
+        cont = (y - y_before)
+
+        jump_norm = torch.linalg.norm(jump, dim=-1)        # shape (n_i,)
+        cont_norm = torch.linalg.norm(cont, dim=-1)        # shape (n_i,)
+
+        err = (jump_norm + cont_norm).pow(2).mean()
+
         losses.append(err)
     return torch.stack(losses).mean()

@@ -66,7 +66,7 @@ class Trainer:
     
     def train(self, train_data_fn: Callable, val_data_fn: Optional[Callable] = None,
               n_epochs: int = 100, print_every: int = 10,
-              save_path: Optional[str] = None) -> Dict:
+              save_path: Optional[str] = None, resume_from_checkpoint: bool = True) -> Dict:
         """
         Train the model.
         
@@ -76,11 +76,39 @@ class Trainer:
             n_epochs: Number of epochs
             print_every: Print progress every N epochs
             save_path: Path to save the trained model
+            resume_from_checkpoint: If True, resume from existing checkpoint if available
         """
         
-        history = {"train_loss": [], "val_loss": [], "epoch_times": []}
+        start_epoch = 0
         
-        for epoch in range(n_epochs):
+        # Check for existing checkpoint
+        if resume_from_checkpoint and save_path and Path(save_path).exists():
+            print(f"Found existing checkpoint at {save_path}")
+            try:
+                checkpoint = torch.load(save_path, map_location=self.device)
+                self.model.load_state_dict(checkpoint["model_state_dict"])
+                self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                self.train_losses = checkpoint.get("train_losses", [])
+                self.val_losses = checkpoint.get("val_losses", [])
+                start_epoch = len(self.train_losses)
+                print(f"Resuming from epoch {start_epoch} (previous best loss: {min(self.train_losses):.6f})")
+                
+                # If already completed training, return existing results
+                if start_epoch >= n_epochs:
+                    print(f"Training already completed ({start_epoch} >= {n_epochs} epochs)")
+                    return {
+                        "train_loss": self.train_losses,
+                        "val_loss": self.val_losses,
+                        "epoch_times": checkpoint.get("epoch_times", []),
+                        "resumed_from_checkpoint": True
+                    }
+            except Exception as e:
+                print(f"Warning: Could not load checkpoint ({e}). Starting fresh training.")
+                start_epoch = 0
+        
+        history = {"train_loss": self.train_losses.copy(), "val_loss": self.val_losses.copy(), "epoch_times": []}
+        
+        for epoch in range(start_epoch, n_epochs):
             start_time = time.time()
             
             # Get training data
@@ -103,26 +131,29 @@ class Trainer:
             history["epoch_times"].append(epoch_time)
             
             # Print progress
-            if epoch % print_every == 0:
+            if epoch % print_every == 0 or epoch == start_epoch:
                 msg = f"Epoch {epoch:4d} | Train Loss: {train_loss:.6f}"
                 if val_loss is not None:
                     msg += f" | Val Loss: {val_loss:.6f}"
                 msg += f" | Time: {epoch_time:.2f}s"
+                if start_epoch > 0 and epoch == start_epoch:
+                    msg += " (resumed)"
                 print(msg)
         
         # Save model
         if save_path is not None:
-            self.save_model(save_path)
+            self.save_model(save_path, history["epoch_times"])
             
         return history
     
-    def save_model(self, path: str):
+    def save_model(self, path: str, epoch_times: Optional[List[float]] = None):
         """Save model state dict."""
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "train_losses": self.train_losses,
-            "val_losses": self.val_losses
+            "val_losses": self.val_losses,
+            "epoch_times": epoch_times or []
         }, path)
         
     def load_model(self, path: str):
@@ -217,7 +248,8 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
         val_data_fn=val_data_fn,
         n_epochs=config["n_epochs"],
         print_every=config.get("print_every", 10),
-        save_path=str(save_path / "model.pt")
+        save_path=str(save_path / "model.pt"),
+        resume_from_checkpoint=config.get("resume_from_checkpoint", True)
     )
     
     # Save history
