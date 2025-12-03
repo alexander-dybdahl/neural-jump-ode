@@ -110,27 +110,14 @@ def plot_single_trajectory_with_condexp(
         preds, _ = model([obs_times_tensor], [obs_values_tensor])
         model_obs = preds[0].squeeze(-1).cpu()  # Remove feature dimension
     
-    # Build model path on full grid by interpolating model predictions
-    # For simplicity, we use linear interpolation between model predictions
+    # Build model path on full grid without seeing the future:
+    # use the last model prediction at or before each time
     model_full = torch.zeros_like(times_full)
     for i, t in enumerate(times_full):
-        # Find surrounding observation times
+        # index of latest observation time <= t
         idx = torch.searchsorted(obs_times, t, right=True) - 1
-        idx = torch.clamp(idx, min=0, max=len(obs_times) - 2)
-        
-        if idx == len(obs_times) - 1:
-            # After last observation, use last prediction
-            model_full[i] = model_obs[-1]
-        else:
-            # Linear interpolation between predictions
-            t1, t2 = obs_times[idx], obs_times[idx + 1]
-            y1, y2 = model_obs[idx], model_obs[idx + 1]
-            
-            if t2 > t1:  # Avoid division by zero
-                weight = (t - t1) / (t2 - t1)
-                model_full[i] = y1 + weight * (y2 - y1)
-            else:
-                model_full[i] = y1
+        idx = torch.clamp(idx, min=0, max=len(obs_times) - 1)
+        model_full[i] = model_obs[idx]
     
     # Create the plot
     plt.figure(figsize=(12, 8))
