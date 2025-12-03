@@ -76,10 +76,12 @@ def test_loss_computation():
     # Generate synthetic data
     batch_times, batch_values = create_trajectory_batch(
         n_trajectories=3, 
-        process_type="jump_diffusion",
-        obs_rate=5.0,
-        T=0.5,
-        jump_rate=1.0
+        process_type="black_scholes",
+        obs_fraction=0.2,
+        T=1.0,
+        mu=0.0,
+        sigma=0.2,
+        x0=1.0
     )
     
     # Forward pass
@@ -107,9 +109,9 @@ def test_gradient_flow():
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     
-    # Generate data
+    # Generate data using Black Scholes
     batch_times, batch_values = create_trajectory_batch(
-        n_trajectories=2, process_type="ou_jumps", T=0.3, obs_rate=8.0
+        n_trajectories=2, process_type="black_scholes", T=1.0, obs_fraction=0.2
     )
     
     # Move data to device
@@ -143,12 +145,15 @@ def test_data_generation():
     """Test synthetic data generation."""
     print("Testing data generation...")
     
-    # Test jump-diffusion
+    # Test Black Scholes
     batch_times, batch_values = create_trajectory_batch(
         n_trajectories=5,
-        process_type="jump_diffusion", 
+        process_type="black_scholes", 
         T=1.0,
-        obs_rate=10.0
+        obs_fraction=0.1,
+        mu=0.0,
+        sigma=0.2,
+        x0=1.0
     )
     
     assert len(batch_times) == 5
@@ -179,7 +184,7 @@ def test_gpu_compatibility():
     
     # Generate data and move to GPU
     batch_times, batch_values = create_trajectory_batch(
-        n_trajectories=3, process_type="jump_diffusion", T=0.5, obs_rate=5.0
+        n_trajectories=3, process_type="black_scholes", T=1.0, obs_fraction=0.2
     )
     batch_times = [t.to(device) for t in batch_times]
     batch_values = [v.to(device) for v in batch_values]

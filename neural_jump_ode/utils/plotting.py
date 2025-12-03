@@ -40,212 +40,168 @@ def plot_training_history(history_path: str, save_path: Optional[str] = None):
     plt.show()
 
 
-def plot_trajectory_predictions(model, batch_times: List[torch.Tensor], 
-                              batch_values: List[torch.Tensor],
-                              n_trajectories: int = 3,
-                              save_path: Optional[str] = None):
+def plot_single_trajectory_with_condexp(
+    model,
+    process_type: str,
+    process_params: dict,
+    obs_fraction: float = 0.1,
+    seed: int = 123,
+    save_path: Optional[str] = None,
+):
     """
-    Plot predicted vs true trajectories with confidence bands.
+    Reproduce Figure 1 style plot.
+    Steps:
+      1. Simulate one full path on grid for chosen process.
+      2. Subsample observation times (about 10 percent).
+      3. Build true conditional expectation path on grid.
+      4. Build NJ ODE prediction path on grid.
+      5. Plot:
+         - true path (solid)
+         - model path (solid)
+         - true conditional expectation (dotted)
+         - observed values (dots)
     """
+    from ..simulation.data_generation import (
+        generate_black_scholes, generate_ou, generate_heston,
+        subsample_random_grid_points, condexp_black_scholes_on_grid,
+        condexp_ou_on_grid, condexp_heston_on_grid
+    )
+    
+    # Generate one full path
+    if process_type == "black_scholes":
+        times_full, X_full = generate_black_scholes(seed=seed, **process_params)
+    elif process_type == "ornstein_uhlenbeck":
+        times_full, X_full = generate_ou(seed=seed, **process_params)
+    elif process_type == "heston":
+        times_full, X_full, V_full = generate_heston(seed=seed, **process_params)
+    else:
+        raise ValueError(f"Unknown process type: {process_type}")
+    
+    # Subsample observation points
+    obs_times, obs_values = subsample_random_grid_points(
+        times_full, X_full, obs_fraction, seed=seed
+    )
+    
+    # Build true conditional expectation on full grid
+    if process_type == "black_scholes":
+        ce_full = condexp_black_scholes_on_grid(
+            times_full, X_full, obs_times, process_params.get("mu", 0.0)
+        )
+    elif process_type == "ornstein_uhlenbeck":
+        ce_full = condexp_ou_on_grid(
+            times_full, X_full, obs_times, 
+            process_params.get("theta", 1.0), process_params.get("mu", 0.0)
+        )
+    elif process_type == "heston":
+        ce_full = condexp_heston_on_grid(
+            times_full, X_full, obs_times, process_params.get("mu", 0.0)
+        )
+    
+    # Build model prediction on full grid
     model.eval()
     device = next(model.parameters()).device
     
-    # Move data to device
-    batch_times = [t.to(device) for t in batch_times[:n_trajectories]]
-    batch_values = [v.to(device) for v in batch_values[:n_trajectories]]
+    # Prepare observation data
+    obs_times_tensor = obs_times.to(device)
+    obs_values_tensor = obs_values.unsqueeze(-1).to(device)  # Add feature dimension
     
+    # Get model predictions at observation times
     with torch.no_grad():
-        preds, preds_before = model(batch_times, batch_values)
+        preds, _ = model([obs_times_tensor], [obs_values_tensor])
+        model_obs = preds[0].squeeze(-1).cpu()  # Remove feature dimension
     
-    fig, axes = plt.subplots(n_trajectories, 1, figsize=(12, 4*n_trajectories))
-    if n_trajectories == 1:
-        axes = [axes]
-    
-    for i in range(n_trajectories):
-        times = batch_times[i].cpu().numpy()
-        true_values = batch_values[i].cpu().numpy().squeeze()
-        pred_values = preds[i].cpu().numpy().squeeze()
-        pred_before = preds_before[i].cpu().numpy().squeeze()
+    # Build model path on full grid by interpolating model predictions
+    # For simplicity, we use linear interpolation between model predictions
+    model_full = torch.zeros_like(times_full)
+    for i, t in enumerate(times_full):
+        # Find surrounding observation times
+        idx = torch.searchsorted(obs_times, t, right=True) - 1
+        idx = torch.clamp(idx, min=0, max=len(obs_times) - 2)
         
-        ax = axes[i]
-        
-        # Plot true trajectory
-        ax.plot(times, true_values, 'o-', label='True Values', alpha=0.8, markersize=6)
-        
-        # Plot predictions at observation times
-        ax.plot(times, pred_values, 's-', label='Predictions (after jump)', alpha=0.8, markersize=4)
-        
-        # Plot predictions before jumps
-        ax.plot(times, pred_before, '^-', label='Predictions (before jump)', alpha=0.6, markersize=4)
-        
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        ax.set_title(f'Trajectory {i+1}: Predictions vs True Values')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    
-    if save_path:
-        plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.show()
-
-
-def plot_model_predictions_with_confidence(model, test_data_fn, n_samples: int = 100,
-                                         n_trajectories: int = 5,
-                                         save_path: Optional[str] = None):
-    """
-    Plot model predictions with confidence bands using multiple samples.
-    """
-    model.eval()
-    device = next(model.parameters()).device
-    
-    # Generate multiple test batches to compute statistics
-    all_predictions = []
-    all_true_values = []
-    all_times = []
-    
-    for _ in range(n_samples):
-        batch_times, batch_values = test_data_fn()
-        batch_times = [t.to(device) for t in batch_times[:n_trajectories]]
-        batch_values = [v.to(device) for v in batch_values[:n_trajectories]]
-        
-        with torch.no_grad():
-            preds, _ = model(batch_times, batch_values)
-        
-        # Store predictions
-        for i in range(len(preds)):
-            if len(all_predictions) <= i:
-                all_predictions.append([])
-                all_true_values.append([])
-                all_times.append([])
+        if idx == len(obs_times) - 1:
+            # After last observation, use last prediction
+            model_full[i] = model_obs[-1]
+        else:
+            # Linear interpolation between predictions
+            t1, t2 = obs_times[idx], obs_times[idx + 1]
+            y1, y2 = model_obs[idx], model_obs[idx + 1]
             
-            all_predictions[i].append(preds[i].cpu().numpy().squeeze())
-            all_true_values[i].append(batch_values[i].cpu().numpy().squeeze())
-            all_times[i].append(batch_times[i].cpu().numpy())
-    
-    # Plot with confidence bands
-    fig, axes = plt.subplots(min(n_trajectories, 3), 1, figsize=(12, 4*min(n_trajectories, 3)))
-    if min(n_trajectories, 3) == 1:
-        axes = [axes]
-    
-    for i in range(min(n_trajectories, 3)):
-        ax = axes[i]
-        
-        # Get statistics across samples
-        pred_array = np.array(all_predictions[i])  # Shape: (n_samples, n_obs)
-        true_array = np.array(all_true_values[i])
-        times_array = np.array(all_times[i])
-        
-        # Use the first trajectory's times as reference
-        ref_times = times_array[0]
-        
-        # Compute statistics
-        pred_mean = np.mean(pred_array, axis=0)
-        pred_std = np.std(pred_array, axis=0)
-        true_mean = np.mean(true_array, axis=0)
-        
-        # Plot confidence bands
-        ax.fill_between(ref_times, 
-                       pred_mean - 2*pred_std, 
-                       pred_mean + 2*pred_std,
-                       alpha=0.2, label='95% Confidence Band')
-        
-        ax.fill_between(ref_times,
-                       pred_mean - pred_std,
-                       pred_mean + pred_std, 
-                       alpha=0.3, label='68% Confidence Band')
-        
-        # Plot means
-        ax.plot(ref_times, pred_mean, '-', linewidth=2, label='Predicted Mean')
-        ax.plot(ref_times, true_mean, 'o-', alpha=0.8, label='True Mean')
-        
-        # Plot sample trajectories
-        for j in range(min(5, n_samples)):
-            if j == 0:
-                ax.plot(times_array[j], pred_array[j], '-', alpha=0.1, color='blue', label='Sample Predictions')
-                ax.plot(times_array[j], true_array[j], 'o', alpha=0.3, color='red', markersize=3, label='Sample True Values')
+            if t2 > t1:  # Avoid division by zero
+                weight = (t - t1) / (t2 - t1)
+                model_full[i] = y1 + weight * (y2 - y1)
             else:
-                ax.plot(times_array[j], pred_array[j], '-', alpha=0.1, color='blue')
-                ax.plot(times_array[j], true_array[j], 'o', alpha=0.3, color='red', markersize=3)
-        
-        ax.set_xlabel('Time')
-        ax.set_ylabel('Value')
-        ax.set_title(f'Model Predictions with Confidence Bands (Trajectory Type {i+1})')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+                model_full[i] = y1
     
-    plt.tight_layout()
+    # Create the plot
+    plt.figure(figsize=(12, 8))
+    
+    # Convert to numpy for plotting
+    times_np = times_full.numpy()
+    X_np = X_full.numpy()
+    ce_np = ce_full.numpy()
+    model_np = model_full.numpy()
+    obs_times_np = obs_times.numpy()
+    obs_values_np = obs_values.numpy()
+    
+    plt.plot(times_np, X_np, 'b-', label='True Path', linewidth=1.5)
+    plt.plot(times_np, model_np, 'r-', label='Model Path', linewidth=1.5)
+    plt.plot(times_np, ce_np, 'g:', label='True Conditional Expectation', linewidth=2)
+    plt.scatter(obs_times_np, obs_values_np, c='black', s=30, label='Observations', zorder=5)
+    
+    plt.xlabel('Time')
+    plt.ylabel('Value')
+    plt.title(f'{process_type.replace("_", " ").title()} Process - Model vs True Conditional Expectation')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
 
 
-def plot_loss_components(model, test_data_fn, n_samples: int = 50, 
-                        save_path: Optional[str] = None):
+def plot_relative_loss(history_paths: List[str], labels: List[str], 
+                      save_path: Optional[str] = None):
     """
-    Analyze and plot different components of the loss function.
+    Load multiple history.json files and plot their relative_loss vs epoch.
+    For Figure 2 style visualization.
+    
+    Args:
+        history_paths: List of paths to history.json files
+        labels: List of labels for each experiment (e.g., ["Black Scholes", "Heston", "OU"])
+        save_path: Optional path to save the plot
     """
-    from ..models.jump_ode import nj_ode_loss
+    plt.figure(figsize=(10, 6))
     
-    model.eval()
-    device = next(model.parameters()).device
-    
-    jump_errors = []
-    continuous_errors = []
-    total_losses = []
-    
-    for _ in range(n_samples):
-        batch_times, batch_values = test_data_fn()
-        batch_times = [t.to(device) for t in batch_times]
-        batch_values = [v.to(device) for v in batch_values]
-        
-        with torch.no_grad():
-            preds, preds_before = model(batch_times, batch_values)
+    for history_path, label in zip(history_paths, labels):
+        try:
+            with open(history_path, 'r') as f:
+                history = json.load(f)
             
-            # Compute loss components
-            for x, y, y_before in zip(batch_values, preds, preds_before):
-                jump_err = (x - y).abs().pow(2).mean().item()
-                cont_err = (y - y_before).abs().pow(2).mean().item()
-                total_loss = jump_err + cont_err
+            if 'relative_loss' in history:
+                epochs = range(len(history['relative_loss']))
+                plt.plot(epochs, history['relative_loss'], label=label, linewidth=2)
+            else:
+                print(f"Warning: 'relative_loss' not found in {history_path}")
                 
-                jump_errors.append(jump_err)
-                continuous_errors.append(cont_err)
-                total_losses.append(total_loss)
+        except FileNotFoundError:
+            print(f"Warning: History file {history_path} not found")
+        except json.JSONDecodeError:
+            print(f"Warning: Could not parse JSON from {history_path}")
     
-    # Plot loss components
-    plt.figure(figsize=(15, 5))
-    
-    plt.subplot(1, 3, 1)
-    plt.hist(jump_errors, bins=20, alpha=0.7, label='Jump Error')
-    plt.xlabel('Jump Error')
-    plt.ylabel('Frequency')
-    plt.title('Distribution of Jump Errors')
+    plt.xlabel('Epoch')
+    plt.ylabel('Relative Loss (L_model - L_true) / L_true')
+    plt.title('Relative Loss: Model vs True Conditional Expectation')
     plt.legend()
     plt.grid(True, alpha=0.3)
-    
-    plt.subplot(1, 3, 2)
-    plt.hist(continuous_errors, bins=20, alpha=0.7, label='Continuous Error', color='orange')
-    plt.xlabel('Continuous Error')
-    plt.ylabel('Frequency')
-    plt.title('Distribution of Continuous Errors')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    plt.subplot(1, 3, 3)
-    plt.scatter(jump_errors, continuous_errors, alpha=0.6)
-    plt.xlabel('Jump Error')
-    plt.ylabel('Continuous Error')
-    plt.title('Jump vs Continuous Error')
-    plt.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.show()
-    
-    print(f"Jump Error - Mean: {np.mean(jump_errors):.6f}, Std: {np.std(jump_errors):.6f}")
-    print(f"Continuous Error - Mean: {np.mean(continuous_errors):.6f}, Std: {np.std(continuous_errors):.6f}")
-    print(f"Total Loss - Mean: {np.mean(total_losses):.6f}, Std: {np.std(total_losses):.6f}")
+
+
+def plot_relative_loss_single(history_path: str, save_path: Optional[str] = None):
+    """
+    Load history.json and plot history["relative_loss"] vs epoch.
+    Single experiment version of plot_relative_loss.
+    """
+    plot_relative_loss([history_path], ["Relative Loss"], save_path)

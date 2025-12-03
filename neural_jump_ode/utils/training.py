@@ -66,7 +66,8 @@ class Trainer:
     
     def train(self, train_data_fn: Callable, val_data_fn: Optional[Callable] = None,
               n_epochs: int = 100, print_every: int = 10,
-              save_path: Optional[str] = None, resume_from_checkpoint: bool = True) -> Dict:
+              save_path: Optional[str] = None, resume_from_checkpoint: bool = True,
+              config: Optional[Dict] = None) -> Dict:
         """
         Train the model.
         
@@ -77,6 +78,7 @@ class Trainer:
             print_every: Print progress every N epochs
             save_path: Path to save the trained model
             resume_from_checkpoint: If True, resume from existing checkpoint if available
+            config: Optional config dict for relative loss computation
         """
         
         start_epoch = 0
@@ -100,13 +102,34 @@ class Trainer:
                         "train_loss": self.train_losses,
                         "val_loss": self.val_losses,
                         "epoch_times": checkpoint.get("epoch_times", []),
+                        "relative_loss": checkpoint.get("relative_loss", []),
                         "resumed_from_checkpoint": True
                     }
             except Exception as e:
                 print(f"Warning: Could not load checkpoint ({e}). Starting fresh training.")
                 start_epoch = 0
         
-        history = {"train_loss": self.train_losses.copy(), "val_loss": self.val_losses.copy(), "epoch_times": []}
+        history = {
+            "train_loss": self.train_losses.copy(), 
+            "val_loss": self.val_losses.copy(), 
+            "epoch_times": [],
+            "relative_loss": []
+        }
+        
+        # Prepare for relative loss computation if config is provided
+        compute_relative_loss = config and "data" in config and "process_type" in config["data"]
+        if compute_relative_loss:
+            process_type = config["data"]["process_type"]
+            if process_type in ["black_scholes", "ornstein_uhlenbeck", "heston"]:
+                # Import conditional expectation functions
+                from ..simulation.data_generation import (
+                    bs_condexp_at_obs, ou_condexp_at_obs, heston_condexp_at_obs
+                )
+                
+                # Get a fixed batch for relative loss computation
+                eval_batch_times, eval_batch_values = train_data_fn()
+                eval_batch_times = [t.to(self.device) for t in eval_batch_times[:10]]  # Use subset for efficiency
+                eval_batch_values = [v.to(self.device) for v in eval_batch_values[:10]]
         
         for epoch in range(start_epoch, n_epochs):
             start_time = time.time()
@@ -127,6 +150,49 @@ class Trainer:
                 self.val_losses.append(val_loss)
                 history["val_loss"].append(val_loss)
             
+            # Compute relative loss every few epochs
+            if compute_relative_loss and epoch % max(1, print_every // 2) == 0:
+                try:
+                    self.model.eval()
+                    with torch.no_grad():
+                        # Model predictions
+                        preds, preds_before = self.model(eval_batch_times, eval_batch_values)
+                        L_model = nj_ode_loss(eval_batch_times, eval_batch_values, preds, preds_before).item()
+                        
+                        # True conditional expectations
+                        if process_type == "black_scholes":
+                            y_true, y_true_before = bs_condexp_at_obs(
+                                [t.cpu() for t in eval_batch_times], 
+                                [v.cpu() for v in eval_batch_values],
+                                mu=config["data"].get("mu", 0.0)
+                            )
+                        elif process_type == "ornstein_uhlenbeck":
+                            y_true, y_true_before = ou_condexp_at_obs(
+                                [t.cpu() for t in eval_batch_times],
+                                [v.cpu() for v in eval_batch_values],
+                                theta=config["data"].get("theta", 1.0),
+                                mu=config["data"].get("mu", 0.0)
+                            )
+                        elif process_type == "heston":
+                            y_true, y_true_before = heston_condexp_at_obs(
+                                [t.cpu() for t in eval_batch_times],
+                                [v.cpu() for v in eval_batch_values],
+                                mu=config["data"].get("mu", 0.0)
+                            )
+                        
+                        # Move true values to device
+                        y_true = [y.to(self.device) for y in y_true]
+                        y_true_before = [y.to(self.device) for y in y_true_before]
+                        
+                        L_true = nj_ode_loss(eval_batch_times, eval_batch_values, y_true, y_true_before).item()
+                        
+                        relative_loss = (L_model - L_true) / max(L_true, 1e-8)  # Avoid division by zero
+                        history["relative_loss"].append(relative_loss)
+                        
+                except Exception as e:
+                    print(f"Warning: Could not compute relative loss at epoch {epoch}: {e}")
+                    history["relative_loss"].append(float('nan'))
+            
             epoch_time = time.time() - start_time
             history["epoch_times"].append(epoch_time)
             
@@ -135,6 +201,8 @@ class Trainer:
                 msg = f"Epoch {epoch:4d} | Train Loss: {train_loss:.6f}"
                 if val_loss is not None:
                     msg += f" | Val Loss: {val_loss:.6f}"
+                if history["relative_loss"]:
+                    msg += f" | Rel Loss: {history['relative_loss'][-1]:.4f}"
                 msg += f" | Time: {epoch_time:.2f}s"
                 if start_epoch > 0 and epoch == start_epoch:
                     msg += " (resumed)"
@@ -142,18 +210,20 @@ class Trainer:
         
         # Save model
         if save_path is not None:
-            self.save_model(save_path, history["epoch_times"])
+            self.save_model(save_path, history["epoch_times"], history["relative_loss"])
             
         return history
     
-    def save_model(self, path: str, epoch_times: Optional[List[float]] = None):
+    def save_model(self, path: str, epoch_times: Optional[List[float]] = None, 
+                   relative_loss: Optional[List[float]] = None):
         """Save model state dict."""
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "train_losses": self.train_losses,
             "val_losses": self.val_losses,
-            "epoch_times": epoch_times or []
+            "epoch_times": epoch_times or [],
+            "relative_loss": relative_loss or []
         }, path)
         
     def load_model(self, path: str):
@@ -165,23 +235,22 @@ class Trainer:
         self.val_losses = checkpoint.get("val_losses", [])
 
 
-def create_data_loaders(process_type: str = "jump_diffusion", 
+def create_data_loaders(process_type: str = "black_scholes", 
                        n_train: int = 100, n_val: int = 20,
-                       obs_rate: float = 10.0, **process_kwargs):
+                       obs_fraction: float = 0.1,
+                       **process_kwargs):
     """Create training and validation data generators."""
     
     from ..simulation import create_trajectory_batch
     
     def train_data_fn():
         return create_trajectory_batch(
-            n_train, process_type, obs_rate, 
-            irregular=True, **process_kwargs
+            n_train, process_type, obs_fraction=obs_fraction, **process_kwargs
         )
     
     def val_data_fn():
         return create_trajectory_batch(
-            n_val, process_type, obs_rate,
-            irregular=True, **process_kwargs
+            n_val, process_type, obs_fraction=obs_fraction, **process_kwargs
         )
     
     return train_data_fn, val_data_fn
@@ -249,7 +318,8 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
         n_epochs=config["n_epochs"],
         print_every=config.get("print_every", 10),
         save_path=str(save_path / "model.pt"),
-        resume_from_checkpoint=config.get("resume_from_checkpoint", True)
+        resume_from_checkpoint=config.get("resume_from_checkpoint", True),
+        config=config
     )
     
     # Save history

@@ -5,7 +5,10 @@ from .plotting import (
     plot_training_history, 
     plot_trajectory_predictions,
     plot_model_predictions_with_confidence,
-    plot_loss_components
+    plot_loss_components,
+    plot_single_trajectory_with_condexp,
+    plot_relative_loss,
+    plot_relative_loss_single
 )
 
 __all__ = [
@@ -15,5 +18,8 @@ __all__ = [
     "plot_training_history",
     "plot_trajectory_predictions", 
     "plot_model_predictions_with_confidence",
-    "plot_loss_components"
+    "plot_loss_components",
+    "plot_single_trajectory_with_condexp",
+    "plot_relative_loss",
+    "plot_relative_loss_single"
 ]

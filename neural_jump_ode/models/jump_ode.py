@@ -155,10 +155,15 @@ class NeuralJumpODE(nn.Module):
             preds_before.append(y_before)
         return preds, preds_before
 
-def nj_ode_loss(batch_times, batch_values, preds, preds_before):
+def nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=False):
     """
-    batch_times, batch_values: same as in forward
-    preds, preds_before: outputs from NeuralJumpODE.forward
+    Implements Phi_N from the paper:
+    (||x_i - y_i|| + ||y_i - y_i^-||)^2 averaged over times and paths.
+    
+    Args:
+        batch_times, batch_values: same as in forward
+        preds, preds_before: outputs from NeuralJumpODE.forward
+        ignore_first_continuity: if True, set continuity penalty to 0 at first observation
     Each element i: preds[i], preds_before[i] have shape (n_i, d_y)
     and we assume d_y = d_x (we predict the process itself).
     """
@@ -173,6 +178,11 @@ def nj_ode_loss(batch_times, batch_values, preds, preds_before):
 
         jump_norm = torch.linalg.norm(jump, dim=-1)        # shape (n_i,)
         cont_norm = torch.linalg.norm(cont, dim=-1)        # shape (n_i,)
+
+        # Optional: no continuity penalty at first point
+        if ignore_first_continuity and len(cont_norm) > 0:
+            cont_norm = cont_norm.clone()  # Ensure we can modify it
+            cont_norm[0] = 0.0
 
         err = (jump_norm + cont_norm).pow(2).mean()
 
