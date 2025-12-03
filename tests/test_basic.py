@@ -100,13 +100,21 @@ def test_gradient_flow():
     """Test that gradients can flow through the model."""
     print("Testing gradient flow...")
     
+    # Test on GPU if available
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    
     model = NeuralJumpODE(input_dim=1, hidden_dim=8, output_dim=1)
+    model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
     
     # Generate data
     batch_times, batch_values = create_trajectory_batch(
         n_trajectories=2, process_type="ou_jumps", T=0.3, obs_rate=8.0
     )
+    
+    # Move data to device
+    batch_times = [t.to(device) for t in batch_times]
+    batch_values = [v.to(device) for v in batch_values]
     
     # Training step
     optimizer.zero_grad()
@@ -125,6 +133,7 @@ def test_gradient_flow():
     
     optimizer.step()
     
+    print(f"  Using device: {device}")
     print(f"  Computed gradients for {len(grad_norms)} parameter groups")
     print(f"  Max gradient norm: {max(grad_norms):.6f}")
     print("✓ Gradient flow test passed")
@@ -155,6 +164,38 @@ def test_data_generation():
     print("✓ Data generation test passed")
 
 
+def test_gpu_compatibility():
+    """Test GPU compatibility if CUDA is available."""
+    if not torch.cuda.is_available():
+        print("GPU compatibility test skipped (CUDA not available)")
+        return
+        
+    print("Testing GPU compatibility...")
+    device = "cuda"
+    
+    # Create model on GPU
+    model = NeuralJumpODE(input_dim=1, hidden_dim=16, output_dim=1)
+    model.to(device)
+    
+    # Generate data and move to GPU
+    batch_times, batch_values = create_trajectory_batch(
+        n_trajectories=3, process_type="jump_diffusion", T=0.5, obs_rate=5.0
+    )
+    batch_times = [t.to(device) for t in batch_times]
+    batch_values = [v.to(device) for v in batch_values]
+    
+    # Forward pass on GPU
+    preds, preds_before = model(batch_times, batch_values)
+    loss = nj_ode_loss(batch_times, batch_values, preds, preds_before)
+    
+    # Check tensors are on GPU
+    assert loss.device.type == "cuda"
+    assert all(p.device.type == "cuda" for p in preds)
+    
+    print(f"  GPU memory allocated: {torch.cuda.memory_allocated() / 1e6:.1f} MB")
+    print("✓ GPU compatibility test passed")
+
+
 def run_all_tests():
     """Run all tests."""
     print("="*50)
@@ -175,6 +216,9 @@ def run_all_tests():
         print()
         
         test_data_generation()
+        print()
+        
+        test_gpu_compatibility()
         print()
         
         print("="*50)

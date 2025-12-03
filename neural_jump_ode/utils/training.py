@@ -176,10 +176,16 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
     with open(save_path / "config.json", "w") as f:
         json.dump(config, f, indent=2)
     
-    # Device
+    # Device selection
     device = config.get("device", "cpu")
     if device == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
+    
+    # Clear GPU cache if using CUDA
+    if device.startswith("cuda") and torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     
     # Create model
     model = NeuralJumpODE(
@@ -202,7 +208,9 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
     # Train
     print(f"Starting experiment: {config['experiment_name']}")
     print(f"Device: {device}")
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters())}")
+    if device.startswith("cuda"):
+        print(f"CUDA Version: {torch.version.cuda}")
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
     history = trainer.train(
         train_data_fn=train_data_fn,

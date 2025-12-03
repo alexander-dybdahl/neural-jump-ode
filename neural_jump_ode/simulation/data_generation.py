@@ -9,19 +9,23 @@ from typing import List, Tuple, Optional
 
 
 def generate_poisson_jumps(rate: float, T: float, seed: Optional[int] = None) -> torch.Tensor:
-    """Generate jump times from a Poisson process."""
+    """Generate jump times from a Poisson process using vectorized operations."""
     if seed is not None:
         np.random.seed(seed)
     
-    # Generate inter-arrival times
-    times = []
-    t = 0.0
-    while t < T:
-        t += np.random.exponential(1.0 / rate)
-        if t < T:
-            times.append(t)
+    # Estimate number of jumps (with some buffer) for vectorized generation
+    expected_jumps = int(rate * T * 1.5 + 10)  # Buffer to avoid resampling
     
-    return torch.tensor(times, dtype=torch.float32)
+    # Generate all inter-arrival times at once
+    inter_arrivals = np.random.exponential(1.0 / rate, expected_jumps)
+    
+    # Compute cumulative arrival times
+    arrival_times = np.cumsum(inter_arrivals)
+    
+    # Keep only times within [0, T]
+    valid_times = arrival_times[arrival_times < T]
+    
+    return torch.tensor(valid_times, dtype=torch.float32)
 
 
 def generate_brownian_motion(n_steps: int, dt: float, d: int = 1, 
@@ -67,18 +71,19 @@ def generate_jump_diffusion(jump_rate: float = 2.0, drift: float = 0.05,
     jump_times = generate_poisson_jumps(jump_rate, T, seed)
     jump_sizes = torch.normal(jump_mean, jump_std, (len(jump_times),))
     
-    # Simulate the process
-    jump_idx = 0
-    for i in range(1, n_steps):
-        t = times_fine[i]
+    # Vectorized simulation of continuous part
+    log_returns = drift * dt + vol * dW
+    X[1:] = X[0] * torch.exp(torch.cumsum(log_returns, dim=0))
+    
+    # Apply jumps efficiently using vectorized operations
+    if len(jump_times) > 0:
+        # Find which time step each jump occurs in
+        jump_indices = torch.searchsorted(times_fine[1:], jump_times, right=False) + 1  # +1 because we search in [1:]
+        jump_indices = torch.clamp(jump_indices, 1, n_steps - 1)  # Ensure valid indices
         
-        # Continuous part (Geometric Brownian Motion)
-        X[i] = X[i-1] * (1 + drift * dt + vol * dW[i-1])
-        
-        # Jump part
-        while jump_idx < len(jump_times) and jump_times[jump_idx] <= t:
-            X[i] *= (1 + jump_sizes[jump_idx])
-            jump_idx += 1
+        # Apply jumps in chronological order
+        for jump_idx, jump_size in zip(jump_indices, jump_sizes):
+            X[jump_idx:] *= (1 + jump_size)
     
     return times_fine, X
 
@@ -108,18 +113,23 @@ def generate_ou_with_jumps(theta: float = 1.0, mu: float = 0.0, sigma: float = 0
     jump_times = generate_poisson_jumps(jump_rate, T, seed)
     jump_sizes = torch.normal(jump_mean, jump_std, (len(jump_times),))
     
-    # Simulate
-    jump_idx = 0
+    # Vectorized OU simulation using exact solution
+    # X(t+dt) = X(t)*exp(-theta*dt) + mu*(1-exp(-theta*dt)) + integral of noise
+    exp_decay = np.exp(-theta * dt)
+    mean_reversion = mu * (1 - exp_decay)
+    noise_factor = sigma * np.sqrt((1 - np.exp(-2 * theta * dt)) / (2 * theta)) if theta > 0 else sigma * np.sqrt(dt)
+    
+    # Generate the OU process
     for i in range(1, n_steps):
-        t = times_fine[i]
+        X[i] = X[i-1] * exp_decay + mean_reversion + noise_factor * torch.randn(1).item()
+    
+    # Apply jumps efficiently
+    if len(jump_times) > 0:
+        jump_indices = torch.searchsorted(times_fine[1:], jump_times, right=False) + 1
+        jump_indices = torch.clamp(jump_indices, 1, n_steps - 1)
         
-        # OU evolution
-        X[i] = X[i-1] + theta * (mu - X[i-1]) * dt + sigma * dW[i-1]
-        
-        # Jumps
-        while jump_idx < len(jump_times) and jump_times[jump_idx] <= t:
-            X[i] += jump_sizes[jump_idx]
-            jump_idx += 1
+        for jump_idx, jump_size in zip(jump_indices, jump_sizes):
+            X[jump_idx:] += jump_size
     
     return times_fine, X
 
@@ -148,8 +158,29 @@ def subsample_trajectory(times: torch.Tensor, values: torch.Tensor,
         dt_obs = 1.0 / obs_rate
         obs_times = torch.arange(0, times[-1] + dt_obs, dt_obs)
     
-    # Interpolate values at observation times
-    obs_values = torch.interp(obs_times, times, values)
+    # Efficient vectorized interpolation using searchsorted
+    # Find indices for interpolation
+    indices = torch.searchsorted(times, obs_times, right=False)
+    
+    # Handle boundary cases
+    indices = torch.clamp(indices, 1, len(times) - 1)
+    
+    # Get left and right time points and values
+    t_left = times[indices - 1]
+    t_right = times[indices]
+    v_left = values[indices - 1]
+    v_right = values[indices]
+    
+    # Compute interpolation weights vectorized
+    weights = (obs_times - t_left) / (t_right - t_left + 1e-10)  # Small epsilon to avoid division by zero
+    weights = torch.clamp(weights, 0, 1)  # Ensure weights are in [0,1]
+    
+    # Linear interpolation
+    obs_values = v_left + weights * (v_right - v_left)
+    
+    # Handle exact boundary matches
+    obs_values[obs_times <= times[0]] = values[0]
+    obs_values[obs_times >= times[-1]] = values[-1]
     
     return obs_times, obs_values
 
