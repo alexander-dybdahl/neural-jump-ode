@@ -150,8 +150,8 @@ class Trainer:
                 self.val_losses.append(val_loss)
                 history["val_loss"].append(val_loss)
             
-            # Compute relative loss every few epochs
-            if compute_relative_loss and epoch % max(1, print_every // 2) == 0:
+            # Compute relative loss less frequently to speed up training
+            if compute_relative_loss and epoch % max(10, print_every) == 0:
                 try:
                     self.model.eval()
                     with torch.no_grad():
@@ -238,20 +238,37 @@ class Trainer:
 def create_data_loaders(process_type: str = "black_scholes", 
                        n_train: int = 100, n_val: int = 20,
                        obs_fraction: float = 0.1,
+                       cache_data: bool = True,
                        **process_kwargs):
-    """Create training and validation data generators."""
+    """Create training and validation data generators with optional caching."""
     
     from ..simulation import create_trajectory_batch
     
-    def train_data_fn():
-        return create_trajectory_batch(
+    if cache_data:
+        # Generate data once and cache it
+        train_data = create_trajectory_batch(
             n_train, process_type, obs_fraction=obs_fraction, **process_kwargs
         )
-    
-    def val_data_fn():
-        return create_trajectory_batch(
+        val_data = create_trajectory_batch(
             n_val, process_type, obs_fraction=obs_fraction, **process_kwargs
         )
+        
+        def train_data_fn():
+            return train_data
+        
+        def val_data_fn():
+            return val_data
+    else:
+        # Generate data fresh each time (old behavior)
+        def train_data_fn():
+            return create_trajectory_batch(
+                n_train, process_type, obs_fraction=obs_fraction, **process_kwargs
+            )
+        
+        def val_data_fn():
+            return create_trajectory_batch(
+                n_val, process_type, obs_fraction=obs_fraction, **process_kwargs
+            )
     
     return train_data_fn, val_data_fn
 

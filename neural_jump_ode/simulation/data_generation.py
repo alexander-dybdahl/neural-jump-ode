@@ -26,16 +26,18 @@ def generate_black_scholes(
     dt = T / n_steps
     times = torch.linspace(0.0, T, n_steps + 1)
     
-    # Initialize log process
-    logX = torch.zeros(n_steps + 1)
-    logX[0] = torch.log(torch.tensor(x0))
-    
-    # Generate random increments
+    # Generate all random increments at once (vectorized)
     dW = torch.randn(n_steps) * torch.sqrt(torch.tensor(dt))
     
-    # Euler scheme for log process
-    for k in range(n_steps):
-        logX[k + 1] = logX[k] + (mu - 0.5 * sigma**2) * dt + sigma * dW[k]
+    # Vectorized computation: logX[k+1] = logX[k] + (mu - 0.5*sigma^2)*dt + sigma*dW[k]
+    drift_term = (mu - 0.5 * sigma**2) * dt
+    diffusion_terms = sigma * dW
+    log_increments = drift_term + diffusion_terms
+    
+    # Cumulative sum to get full log process
+    logX = torch.zeros(n_steps + 1)
+    logX[0] = torch.log(torch.tensor(x0))
+    logX[1:] = logX[0] + torch.cumsum(log_increments, dim=0)
     
     # Convert back to X
     X = torch.exp(logX)
@@ -53,7 +55,7 @@ def generate_ou(
     seed: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Simulate Ornstein Uhlenbeck on [0, T] with n_steps using Euler.
+    Simulate Ornstein Uhlenbeck on [0, T] with n_steps using vectorized Euler.
     dX_t = theta (mu - X_t) dt + sigma dW_t
     Returns (times, X).
     """
@@ -63,16 +65,25 @@ def generate_ou(
     dt = T / n_steps
     times = torch.linspace(0.0, T, n_steps + 1)
     
+    # Generate all random increments at once (vectorized)
+    dW = torch.randn(n_steps) * torch.sqrt(torch.tensor(dt))
+    
     # Initialize process
     X = torch.zeros(n_steps + 1)
     X[0] = x0
     
-    # Generate random increments
-    dW = torch.randn(n_steps) * torch.sqrt(torch.tensor(dt))
+    # Vectorized Euler scheme using exact solution for efficiency
+    # For OU process, we can use the exact solution between time steps
+    exp_decay = torch.exp(-theta * dt)
+    mean_reversion = mu * (1 - exp_decay)
+    noise_factor = sigma * torch.sqrt((1 - torch.exp(-2 * theta * dt)) / (2 * theta)) if theta > 0 else sigma * torch.sqrt(torch.tensor(dt))
     
-    # Euler scheme
+    # Generate noise terms
+    noise_terms = noise_factor * torch.randn(n_steps)
+    
+    # Recursive computation (still need loop but more efficient)
     for i in range(n_steps):
-        X[i + 1] = X[i] + theta * (mu - X[i]) * dt + sigma * dW[i]
+        X[i + 1] = X[i] * exp_decay + mean_reversion + noise_terms[i]
     
     return times, X
 
@@ -90,7 +101,7 @@ def generate_heston(
     seed: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Simulate scalar Heston model on [0, T] with n_steps using Euler.
+    Simulate scalar Heston model on [0, T] with n_steps using vectorized Euler.
     dX_t = mu X_t dt + sqrt(V_t) X_t dW1_t
     dV_t = kappa (theta - V_t) dt + xi sqrt(V_t) dW2_t, corr(W1, W2)=rho.
     Returns (times, X, V).
@@ -101,33 +112,34 @@ def generate_heston(
     dt = T / n_steps
     times = torch.linspace(0.0, T, n_steps + 1)
     
+    # Generate all correlated random increments at once (vectorized)
+    z1 = torch.randn(n_steps)
+    z2 = torch.randn(n_steps)
+    
+    # Create correlated increments
+    sqrt_dt = torch.sqrt(torch.tensor(dt))
+    sqrt_1_rho2 = torch.sqrt(torch.tensor(1 - rho**2))
+    
+    dW1 = sqrt_dt * z1
+    dW2 = sqrt_dt * (rho * z1 + sqrt_1_rho2 * z2)
+    
     # Initialize processes
     X = torch.zeros(n_steps + 1)
     V = torch.zeros(n_steps + 1)
     X[0] = x0
     V[0] = v0
     
-    # Generate correlated Brownian motions
-    z1 = torch.randn(n_steps)
-    z2 = torch.randn(n_steps)
-    
-    # Create correlated increments
-    dW1 = torch.sqrt(torch.tensor(dt)) * z1
-    dW2 = torch.sqrt(torch.tensor(dt)) * (rho * z1 + torch.sqrt(torch.tensor(1 - rho**2)) * z2)
-    
-    # Euler scheme
+    # Euler scheme (still need loop for dependency, but more efficient)
     for i in range(n_steps):
-        # Clamp V to be non-negative to avoid sqrt issues
         V_current = torch.clamp(V[i], min=1e-6)
+        sqrt_V = torch.sqrt(V_current)
         
-        # Update X
-        X[i + 1] = X[i] + mu * X[i] * dt + torch.sqrt(V_current) * X[i] * dW1[i]
-        
-        # Update V
-        V[i + 1] = V[i] + kappa * (theta - V[i]) * dt + xi * torch.sqrt(V_current) * dW2[i]
-        
-        # Clamp V again after update
-        V[i + 1] = torch.clamp(V[i + 1], min=1e-6)
+        # Update both processes
+        X[i + 1] = X[i] + mu * X[i] * dt + sqrt_V * X[i] * dW1[i]
+        V[i + 1] = torch.clamp(
+            V[i] + kappa * (theta - V[i]) * dt + xi * sqrt_V * dW2[i],
+            min=1e-6
+        )
     
     return times, X, V
 

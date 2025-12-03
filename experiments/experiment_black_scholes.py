@@ -28,16 +28,17 @@ def main():
         "input_dim": 1,
         "hidden_dim": 32,
         "output_dim": 1,
-        "n_steps_between": 5,
+        "n_steps_between": 1,
         "learning_rate": 1e-3,
         "n_epochs": 200,
         "print_every": 10,
         "device": "auto",
         "data": {
             "process_type": "black_scholes",
-            "n_train": 500,
-            "n_val": 100,
+            "n_train": 200,
+            "n_val": 50,
             "obs_fraction": 0.1,  # About 10% of grid points as observations
+            "cache_data": True,  # Cache data for performance
             "mu": 0.0,
             "sigma": 0.2,
             "T": 1.0,
