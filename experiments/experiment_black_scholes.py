@@ -30,7 +30,7 @@ def main():
         "output_dim": 1,
         "n_steps_between": 5,
         "learning_rate": 1e-3,
-        "n_epochs": 200,
+        "n_epochs": 700,
         "print_every": 10,
         "device": "auto",
         "ignore_first_continuity": True,
@@ -85,7 +85,7 @@ def main():
     ).to(device)
     
     # Load the trained weights
-    checkpoint = torch.load(str(save_path / "model.pt"), map_location=device)
+    checkpoint = torch.load(str(save_path / "model.pt"), map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     
     # Plot single trajectory comparison

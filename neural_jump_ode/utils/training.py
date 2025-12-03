@@ -88,7 +88,7 @@ class Trainer:
         if resume_from_checkpoint and save_path and Path(save_path).exists():
             print(f"Found existing checkpoint at {save_path}")
             try:
-                checkpoint = torch.load(save_path, map_location=self.device)
+                checkpoint = torch.load(save_path, map_location=self.device, weights_only=False)
                 self.model.load_state_dict(checkpoint["model_state_dict"])
                 self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
                 self.train_losses = checkpoint.get("train_losses", [])
@@ -229,7 +229,7 @@ class Trainer:
         
     def load_model(self, path: str):
         """Load model state dict."""
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.train_losses = checkpoint.get("train_losses", [])

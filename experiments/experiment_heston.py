@@ -89,7 +89,7 @@ def main():
     ).to(device)
     
     # Load the trained weights
-    checkpoint = torch.load(str(save_path / "model.pt"), map_location=device)
+    checkpoint = torch.load(str(save_path / "model.pt"), map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     
     # Plot single trajectory comparison
