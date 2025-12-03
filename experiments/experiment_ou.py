@@ -41,7 +41,7 @@ def main():
             "obs_fraction": 0.1,  # About 10% of grid points as observations
             "cache_data": True,  # Cache data for performance
             "theta": 1.0,
-            "mu": 0.0,
+            "mu": 0.5,
             "sigma": 0.3,
             "T": 1.0,
             "n_steps": 100,

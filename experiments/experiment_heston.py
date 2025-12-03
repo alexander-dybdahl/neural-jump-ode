@@ -40,7 +40,7 @@ def main():
             "n_val": 50,
             "obs_fraction": 0.1,  # About 10% of grid points as observations
             "cache_data": True,  # Cache data for performance
-            "mu": 0.0,
+            "mu": 0.5,
             "kappa": 2.0,
             "theta": 0.04,
             "xi": 0.5,
