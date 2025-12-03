@@ -50,7 +50,7 @@ def main():
     }
     
     # Run experiment
-    results = run_experiment(config, save_dir="../runs")
+    results = run_experiment(config, save_dir=str(project_root / "runs"))
     
     print("\n" + "="*50)
     print("EXPERIMENT RESULTS")
