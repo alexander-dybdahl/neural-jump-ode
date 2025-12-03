@@ -34,7 +34,7 @@ def test_model_creation():
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Model has {n_params} parameters")
     
-    print("✓ Model creation test passed")
+    print("Model creation test passed")
 
 
 def test_forward_pass():
@@ -64,7 +64,7 @@ def test_forward_pass():
     
     print("  Output shapes are correct")
     print(f"  Pred 1 range: [{preds[0].min():.3f}, {preds[0].max():.3f}]")
-    print("✓ Forward pass test passed")
+    print("Forward pass test passed")
 
 
 def test_loss_computation():
@@ -93,7 +93,7 @@ def test_loss_computation():
     assert loss.item() > 0, "Loss should be positive"
     
     print(f"  Loss value: {loss.item():.6f}")
-    print("✓ Loss computation test passed")
+    print("Loss computation test passed")
 
 
 def test_gradient_flow():
@@ -136,7 +136,7 @@ def test_gradient_flow():
     print(f"  Using device: {device}")
     print(f"  Computed gradients for {len(grad_norms)} parameter groups")
     print(f"  Max gradient norm: {max(grad_norms):.6f}")
-    print("✓ Gradient flow test passed")
+    print("Gradient flow test passed")
 
 
 def test_data_generation():
@@ -161,7 +161,7 @@ def test_data_generation():
         assert torch.all(times[1:] > times[:-1])  # Should be sorted
         print(f"  Trajectory {i}: {len(times)} observations over [{times[0]:.2f}, {times[-1]:.2f}]")
     
-    print("✓ Data generation test passed")
+    print("Data generation test passed")
 
 
 def test_gpu_compatibility():
@@ -193,7 +193,7 @@ def test_gpu_compatibility():
     assert all(p.device.type == "cuda" for p in preds)
     
     print(f"  GPU memory allocated: {torch.cuda.memory_allocated() / 1e6:.1f} MB")
-    print("✓ GPU compatibility test passed")
+    print("GPU compatibility test passed")
 
 
 def run_all_tests():
@@ -222,11 +222,11 @@ def run_all_tests():
         print()
         
         print("="*50)
-        print("ALL TESTS PASSED! ✓")
+        print("ALL TESTS PASSED!")
         print("="*50)
         
     except Exception as e:
-        print(f"\n❌ TEST FAILED: {e}")
+        print(f"\nTEST FAILED: {e}")
         raise
 
 
