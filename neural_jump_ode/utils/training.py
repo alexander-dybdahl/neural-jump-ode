@@ -38,7 +38,7 @@ class Trainer:
         preds, preds_before = self.model(batch_times, batch_values)
         
         # Compute loss
-        loss = nj_ode_loss(batch_times, batch_values, preds, preds_before)
+        loss = nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=self.ignore_first_continuity)
         
         # Backward pass
         loss.backward()
@@ -60,7 +60,7 @@ class Trainer:
             preds, preds_before = self.model(batch_times, batch_values)
             
             # Compute loss
-            loss = nj_ode_loss(batch_times, batch_values, preds, preds_before)
+            loss = nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=self.ignore_first_continuity)
             
         return loss.item()
     
@@ -317,7 +317,7 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
     optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
     
     # Trainer
-    trainer = Trainer(model, optimizer, device)
+    trainer = Trainer(model, optimizer, device, ignore_first_continuity=config.get("ignore_first_continuity", False))
     
     # Data loaders
     train_data_fn, val_data_fn = create_data_loaders(**config["data"])

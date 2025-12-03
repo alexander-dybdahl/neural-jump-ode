@@ -28,11 +28,12 @@ def main():
         "input_dim": 1,
         "hidden_dim": 32,
         "output_dim": 1,
-        "n_steps_between": 1,
+        "n_steps_between": 5,
         "learning_rate": 1e-3,
         "n_epochs": 200,
         "print_every": 10,
         "device": "auto",
+        "ignore_first_continuity": True,
         "data": {
             "process_type": "heston",
             "n_train": 200,
