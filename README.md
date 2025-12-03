@@ -4,7 +4,7 @@ This repository contains the code for the Neural Jump ODE project.
 
 ## Description
 
-A project developed as part of the Seminar in Computational Finance for CSE at ETH Zurich.
+A project developed as part of the Seminar in Computational Finance at ETH Zurich.
 
 ## Getting Started
 
