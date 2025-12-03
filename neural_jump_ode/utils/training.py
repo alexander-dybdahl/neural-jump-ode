@@ -14,10 +14,11 @@ from ..models.jump_ode import NeuralJumpODE, nj_ode_loss
 
 class Trainer:
     def __init__(self, model: NeuralJumpODE, optimizer: optim.Optimizer,
-                 device: str = "cpu"):
+                 device: str = "cpu", ignore_first_continuity: bool = False):
         self.model = model
         self.optimizer = optimizer
         self.device = device
+        self.ignore_first_continuity = ignore_first_continuity
         self.model.to(device)
         
         self.train_losses = []

@@ -30,7 +30,7 @@ def main():
         "output_dim": 1,
         "n_steps_between": 5,
         "learning_rate": 1e-3,
-        "n_epochs": 600,
+        "n_epochs": 200,
         "print_every": 10,
         "device": "auto",
         "ignore_first_continuity": True,
@@ -39,7 +39,7 @@ def main():
             "n_train": 200,
             "n_val": 50,
             "obs_fraction": 0.1,  # About 10% of grid points as observations
-            "cache_data": False,  # Cache data for performance
+            "cache_data": True,  # Cache data for performance
             "mu": 0.0,
             "sigma": 0.2,
             "T": 1.0,

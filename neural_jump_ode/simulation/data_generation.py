@@ -72,11 +72,16 @@ def generate_ou(
     X = torch.zeros(n_steps + 1)
     X[0] = x0
     
+    # Convert parameters to tensors for consistency
+    theta_tensor = torch.tensor(theta)
+    mu_tensor = torch.tensor(mu)
+    sigma_tensor = torch.tensor(sigma)
+    
     # Vectorized Euler scheme using exact solution for efficiency
     # For OU process, we can use the exact solution between time steps
-    exp_decay = torch.exp(-theta * dt)
-    mean_reversion = mu * (1 - exp_decay)
-    noise_factor = sigma * torch.sqrt((1 - torch.exp(-2 * theta * dt)) / (2 * theta)) if theta > 0 else sigma * torch.sqrt(torch.tensor(dt))
+    exp_decay = torch.exp(-theta_tensor * dt)
+    mean_reversion = mu_tensor * (1 - exp_decay)
+    noise_factor = sigma_tensor * torch.sqrt((1 - torch.exp(-2 * theta_tensor * dt)) / (2 * theta_tensor)) if theta > 0 else sigma_tensor * torch.sqrt(dt)
     
     # Generate noise terms
     noise_terms = noise_factor * torch.randn(n_steps)
