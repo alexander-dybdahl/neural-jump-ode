@@ -169,8 +169,9 @@ class NeuralJumpODE(nn.Module):
 
 def nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=False, moment_weights=None):
     """
-    Implements Phi_N from the paper for multiple moments:
-    (||x_i - y_i|| + ||y_i - y_i^-||)^2 averaged over times, paths, and moments.
+    Implements Phi_N from the paper for multiple moments with proper variance handling:
+    - Moment 0 (Y): trained to approximate X (conditional mean)
+    - Moment 1 (W): trained such that V = W^2 approximates Z = (X - Y_detached)^2 (conditional variance)
     
     Args:
         batch_times, batch_values: same as in forward
@@ -178,48 +179,57 @@ def nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_con
         ignore_first_continuity: if True, set continuity penalty to 0 at first observation
         moment_weights: optional tensor of shape (num_moments,) to weight different moments
     Each element i: preds[i], preds_before[i] have shape (n_i, d_y, num_moments)
-    For moment k=0 (mean), we compare with x directly.
-    For moment k=1 (variance), we compare with (x - mean_pred)^2.
     """
     losses = []
-    for i, (times, x, y, y_before) in enumerate(zip(batch_times, batch_values, preds, preds_before)):
+    for times, x, y, y_before in zip(batch_times, batch_values, preds, preds_before):
         # x: (n_i, d_x), y: (n_i, d_x, num_moments), y_before: (n_i, d_x, num_moments)
         n_obs, d_x, num_moments = y.shape
-        
         total_loss = 0.0
         
-        for moment in range(num_moments):
-            y_m = y[:, :, moment]  # (n_i, d_x)
-            y_before_m = y_before[:, :, moment]  # (n_i, d_x)
+        # 1) Mean head loss Ψ(X, Y)
+        Y = y[:, :, 0]  # Mean predictions
+        Y_before = y_before[:, :, 0]  # Mean predictions before jump
+        
+        jump_mean = x - Y
+        cont_mean = Y - Y_before
+        
+        jump_mean_norm = torch.norm(jump_mean, dim=1)  # (n_i,)
+        cont_mean_norm = torch.norm(cont_mean, dim=1)  # (n_i,)
+        
+        # Ignore first continuity if requested
+        if ignore_first_continuity and len(cont_mean_norm) > 0:
+            cont_mean_norm = cont_mean_norm.clone()
+            cont_mean_norm[0] = 0.0
+        
+        loss_mean = ((jump_mean_norm + cont_mean_norm) ** 2).mean()
+        w_mean = 1.0 if moment_weights is None else moment_weights[0]
+        total_loss = total_loss + w_mean * loss_mean
+        
+        # 2) Variance head loss Ψ(Z, V) if we have num_moments > 1
+        if num_moments > 1:
+            W = y[:, :, 1]  # Raw variance head output
+            W_before = y_before[:, :, 1]  # Raw variance head output before jump
             
-            if moment == 0:
-                # First moment (mean): compare with x directly
-                target = x
-            elif moment == 1:
-                # Second moment (variance): compare with (x - mean_pred)^2
-                mean_pred = y[:, :, 0]  # Use predicted mean
-                target = (x - mean_pred) ** 2
-            else:
-                # Higher moments: (x - mean_pred)^moment
-                mean_pred = y[:, :, 0]  # Use predicted mean
-                target = torch.abs(x - mean_pred) ** (moment + 1)
+            # Detach mean in Z = (X - Y)^2 to prevent gradient flow to mean head
+            Y_detached = Y.detach()
+            Z = (x - Y_detached) ** 2  # Target process (squared residuals)
+            V = W ** 2  # Enforce non-negativity: V = W^2
+            V_before = W_before ** 2
             
-            # "jump part": target - y_m
-            jump = (target - y_m)
-            # "continuous part": y_m - y_before_m
-            cont = (y_m - y_before_m)
-
-            jump_norm = torch.norm(jump, dim=1)  # (n_i,)
-            cont_norm = torch.norm(cont, dim=1)  # (n_i,)
+            jump_var = Z - V
+            cont_var = V - V_before
+            
+            jump_var_norm = torch.norm(jump_var, dim=1)  # (n_i,)
+            cont_var_norm = torch.norm(cont_var, dim=1)  # (n_i,)
             
             # Ignore first continuity if requested
-            if ignore_first_continuity and len(cont_norm) > 0:
-                cont_norm = cont_norm.clone()  # Avoid in-place modification
-                cont_norm[0] = 0.0
+            if ignore_first_continuity and len(cont_var_norm) > 0:
+                cont_var_norm = cont_var_norm.clone()
+                cont_var_norm[0] = 0.0
             
-            # Weight by moment importance
-            weight = 1.0 if moment_weights is None else moment_weights[moment]
-            total_loss += weight * torch.mean(jump_norm + cont_norm)
+            loss_var = ((jump_var_norm + cont_var_norm) ** 2).mean()
+            w_var = 1.0 if moment_weights is None else moment_weights[1]
+            total_loss = total_loss + w_var * loss_var
         
         losses.append(total_loss)
 
