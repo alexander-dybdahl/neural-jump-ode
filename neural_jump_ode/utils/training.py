@@ -160,26 +160,21 @@ class Trainer:
                         preds, preds_before = self.model(eval_batch_times, eval_batch_values)
                         L_model = nj_ode_loss(eval_batch_times, eval_batch_values, preds, preds_before).item()
                         
-                        # True conditional expectations
-                        if process_type == "black_scholes":
-                            y_true, y_true_before = bs_condexp_at_obs(
-                                [t.cpu() for t in eval_batch_times], 
-                                [v.cpu() for v in eval_batch_values],
-                                mu=config["data"].get("mu", 0.0)
-                            )
-                        elif process_type == "ornstein_uhlenbeck":
-                            y_true, y_true_before = ou_condexp_at_obs(
-                                [t.cpu() for t in eval_batch_times],
-                                [v.cpu() for v in eval_batch_values],
-                                theta=config["data"].get("theta", 1.0),
-                                mu=config["data"].get("mu", 0.0)
-                            )
-                        elif process_type == "heston":
-                            y_true, y_true_before = heston_condexp_at_obs(
-                                [t.cpu() for t in eval_batch_times],
-                                [v.cpu() for v in eval_batch_values],
-                                mu=config["data"].get("mu", 0.0)
-                            )
+                        # True conditional expectations for multiple moments
+                        from ..simulation.data_generation import get_conditional_moments_at_obs
+                        
+                        num_moments = getattr(self.model, 'num_moments', 1)
+                        
+                        # Extract process parameters without process_type to avoid duplicate argument
+                        process_params = {k: v for k, v in config["data"].items() if k != "process_type"}
+                        
+                        y_true, y_true_before = get_conditional_moments_at_obs(
+                            [t.cpu() for t in eval_batch_times], 
+                            [v.cpu() for v in eval_batch_values],
+                            process_type=process_type,
+                            num_moments=num_moments,
+                            **process_params
+                        )
                         
                         # Move true values to device
                         y_true = [y.to(self.device) for y in y_true]

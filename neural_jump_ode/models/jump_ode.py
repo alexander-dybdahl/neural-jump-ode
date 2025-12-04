@@ -214,6 +214,7 @@ def nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_con
             
             # Ignore first continuity if requested
             if ignore_first_continuity and len(cont_norm) > 0:
+                cont_norm = cont_norm.clone()  # Avoid in-place modification
                 cont_norm[0] = 0.0
             
             # Weight by moment importance
