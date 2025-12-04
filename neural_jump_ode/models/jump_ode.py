@@ -55,26 +55,34 @@ class OutputNN(nn.Module):
 
 class NeuralJumpODE(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim,
-                 dt_between_obs=None, n_steps_between=0):
+                 dt_between_obs=None, n_steps_between=0, num_moments=1):
         """
         dt_between_obs: size of Euler step for interpolation between obs
         n_steps_between: number of intermediate steps between two obs times
                          if 0, only evaluate at obs times
+        num_moments: number of moments to learn (1=mean only, 2=mean+variance, etc.)
         """
         super().__init__()
-        self.jump_nn = JumpNN(input_dim, hidden_dim)
-        self.ode_func = ODEFunc(hidden_dim, input_dim)
-        self.output_nn = OutputNN(hidden_dim, output_dim)
+        self.num_moments = num_moments
+        
+        # Create separate networks for each moment
+        self.jump_nns = nn.ModuleList([JumpNN(input_dim, hidden_dim) for _ in range(num_moments)])
+        self.ode_funcs = nn.ModuleList([ODEFunc(hidden_dim, input_dim) for _ in range(num_moments)])
+        self.output_nns = nn.ModuleList([OutputNN(hidden_dim, output_dim) for _ in range(num_moments)])
+        
         self.n_steps_between = n_steps_between
         self.dt_between_obs = dt_between_obs
 
-    def euler_step(self, h, x_last, t_last, t_next):
+    def euler_step(self, h_list, x_last, t_last, t_next):
         """
-        Single Euler step from t_last to t_next.
+        Single Euler step from t_last to t_next for all moments.
         """
-        dh = self.ode_func(t_next, h, x_last, t_last)
-        dt = (t_next - t_last)
-        return h + dt * dh
+        new_h_list = []
+        for i in range(self.num_moments):
+            dh = self.ode_funcs[i](t_next, h_list[i], x_last, t_last)
+            dt = (t_next - t_last)
+            new_h_list.append(h_list[i] + dt * dh)
+        return new_h_list
 
     def forward_single(self, times, values):
         """
@@ -84,29 +92,32 @@ class NeuralJumpODE(nn.Module):
         values: (n_obs, d_x) matching observations
 
         Returns:
-            obs_pred: (n_obs, d_y) outputs at observation times
-            obs_pred_before_jump: (n_obs, d_y) outputs just before jumps
+            obs_pred: (n_obs, d_y, num_moments) outputs at observation times for each moment
+            obs_pred_before_jump: (n_obs, d_y, num_moments) outputs just before jumps for each moment
         """
         n_obs, d_x = values.shape
         device = values.device
+        d_y = self.output_nns[0].net[-1].out_features
 
         obs_pred = []
         obs_pred_before = []
 
-        # initialise before first obs as zero output
-        y_before = torch.zeros(1, self.output_nn.net[-1].out_features,
-                               device=device)
+        # initialise before first obs as zero output for all moments
+        y_before = torch.zeros(1, d_y, self.num_moments, device=device)
 
         for i in range(n_obs):
             t_i = times[i]
             x_i = values[i].unsqueeze(0)  # shape (1, d_x)
 
-            # jump: set hidden state from observation
-            h_i = self.jump_nn(x_i)  # (1, d_h)
-            y_i = self.output_nn(h_i)  # (1, d_y)
+            # jump: set hidden state from observation for each moment
+            h_list = [self.jump_nns[m](x_i) for m in range(self.num_moments)]  # List of (1, d_h)
+            y_list = [self.output_nns[m](h_list[m]) for m in range(self.num_moments)]  # List of (1, d_y)
+            
+            # Stack moments: (1, d_y, num_moments)
+            y_i = torch.stack(y_list, dim=-1)
 
-            obs_pred.append(y_i.squeeze(0))
-            obs_pred_before.append(y_before.squeeze(0))
+            obs_pred.append(y_i.squeeze(0))  # (d_y, num_moments)
+            obs_pred_before.append(y_before.squeeze(0))  # (d_y, num_moments)
 
             # propagate to next observation if there is one
             if i < n_obs - 1:
@@ -114,28 +125,29 @@ class NeuralJumpODE(nn.Module):
 
                 if self.n_steps_between <= 0:
                     # single step from t_i to t_next
-                    h_next_minus = self.euler_step(h_i, x_i, t_i, t_next)
+                    h_next_minus_list = self.euler_step(h_list, x_i, t_i, t_next)
                 else:
                     # multiple Euler substeps
                     if self.dt_between_obs is None:
                         dt = (t_next - t_i) / float(self.n_steps_between)
                     else:
                         dt = self.dt_between_obs
-                    h = h_i
+                    h_cur_list = h_list
                     t_cur = t_i
                     while t_cur + dt < t_next:
                         t_new = t_cur + dt
-                        h = self.euler_step(h, x_i, t_cur, t_new)
+                        h_cur_list = self.euler_step(h_cur_list, x_i, t_cur, t_new)
                         t_cur = t_new
                     # final partial step to exactly t_next
                     if t_cur < t_next:
-                        h = self.euler_step(h, x_i, t_cur, t_next)
-                    h_next_minus = h
+                        h_cur_list = self.euler_step(h_cur_list, x_i, t_cur, t_next)
+                    h_next_minus_list = h_cur_list
 
-                y_before = self.output_nn(h_next_minus)
+                y_before_list = [self.output_nns[m](h_next_minus_list[m]) for m in range(self.num_moments)]
+                y_before = torch.stack(y_before_list, dim=-1)  # (1, d_y, num_moments)
 
-        obs_pred = torch.stack(obs_pred, dim=0)
-        obs_pred_before = torch.stack(obs_pred_before, dim=0)
+        obs_pred = torch.stack(obs_pred, dim=0)  # (n_obs, d_y, num_moments)
+        obs_pred_before = torch.stack(obs_pred_before, dim=0)  # (n_obs, d_y, num_moments)
         return obs_pred, obs_pred_before
 
     def forward(self, batch_times, batch_values):
@@ -144,8 +156,8 @@ class NeuralJumpODE(nn.Module):
         batch_values: list of length B, each element (n_i, d_x) tensor
 
         Returns:
-            preds: list of tensors of shape (n_i, d_y)
-            preds_before: list of tensors (n_i, d_y)
+            preds: list of tensors of shape (n_i, d_y, num_moments)
+            preds_before: list of tensors (n_i, d_y, num_moments)
         """
         preds = []
         preds_before = []
@@ -155,36 +167,59 @@ class NeuralJumpODE(nn.Module):
             preds_before.append(y_before)
         return preds, preds_before
 
-def nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=False):
+def nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=False, moment_weights=None):
     """
-    Implements Phi_N from the paper:
-    (||x_i - y_i|| + ||y_i - y_i^-||)^2 averaged over times and paths.
+    Implements Phi_N from the paper for multiple moments:
+    (||x_i - y_i|| + ||y_i - y_i^-||)^2 averaged over times, paths, and moments.
     
     Args:
         batch_times, batch_values: same as in forward
         preds, preds_before: outputs from NeuralJumpODE.forward
         ignore_first_continuity: if True, set continuity penalty to 0 at first observation
-    Each element i: preds[i], preds_before[i] have shape (n_i, d_y)
-    and we assume d_y = d_x (we predict the process itself).
+        moment_weights: optional tensor of shape (num_moments,) to weight different moments
+    Each element i: preds[i], preds_before[i] have shape (n_i, d_y, num_moments)
+    For moment k=0 (mean), we compare with x directly.
+    For moment k=1 (variance), we compare with (x - mean_pred)^2.
     """
     losses = []
-    for x, y, y_before in zip(batch_values, preds, preds_before):
-        # x: (n_i, d_x), y: (n_i, d_x), y_before: (n_i, d_x)
-        # "jump part": x - y
-        # "continuous part": y - y_before
+    for i, (times, x, y, y_before) in enumerate(zip(batch_times, batch_values, preds, preds_before)):
+        # x: (n_i, d_x), y: (n_i, d_x, num_moments), y_before: (n_i, d_x, num_moments)
+        n_obs, d_x, num_moments = y.shape
+        
+        total_loss = 0.0
+        
+        for moment in range(num_moments):
+            y_m = y[:, :, moment]  # (n_i, d_x)
+            y_before_m = y_before[:, :, moment]  # (n_i, d_x)
+            
+            if moment == 0:
+                # First moment (mean): compare with x directly
+                target = x
+            elif moment == 1:
+                # Second moment (variance): compare with (x - mean_pred)^2
+                mean_pred = y[:, :, 0]  # Use predicted mean
+                target = (x - mean_pred) ** 2
+            else:
+                # Higher moments: (x - mean_pred)^moment
+                mean_pred = y[:, :, 0]  # Use predicted mean
+                target = torch.abs(x - mean_pred) ** (moment + 1)
+            
+            # "jump part": target - y_m
+            jump = (target - y_m)
+            # "continuous part": y_m - y_before_m
+            cont = (y_m - y_before_m)
 
-        jump = (x - y)
-        cont = (y - y_before)
+            jump_norm = torch.norm(jump, dim=1)  # (n_i,)
+            cont_norm = torch.norm(cont, dim=1)  # (n_i,)
+            
+            # Ignore first continuity if requested
+            if ignore_first_continuity and len(cont_norm) > 0:
+                cont_norm[0] = 0.0
+            
+            # Weight by moment importance
+            weight = 1.0 if moment_weights is None else moment_weights[moment]
+            total_loss += weight * torch.mean(jump_norm + cont_norm)
+        
+        losses.append(total_loss)
 
-        jump_norm = torch.linalg.norm(jump, dim=-1)        # shape (n_i,)
-        cont_norm = torch.linalg.norm(cont, dim=-1)        # shape (n_i,)
-
-        # Optional: no continuity penalty at first point
-        if ignore_first_continuity and len(cont_norm) > 0:
-            cont_norm = cont_norm.clone()  # Ensure we can modify it
-            cont_norm[0] = 0.0
-
-        err = (jump_norm + cont_norm).pow(2).mean()
-
-        losses.append(err)
     return torch.stack(losses).mean()

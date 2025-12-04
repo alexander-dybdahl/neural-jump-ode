@@ -34,6 +34,7 @@ def main():
         "print_every": 10,
         "device": "auto",
         "ignore_first_continuity": True,
+        "num_moments": 2,  # Learn both mean and variance
         "data": {
             "process_type": "heston",
             "n_train": 200,
@@ -85,7 +86,8 @@ def main():
         input_dim=config["input_dim"],
         hidden_dim=config["hidden_dim"],
         output_dim=config["output_dim"],
-        n_steps_between=config.get("n_steps_between", 0)
+        n_steps_between=config.get("n_steps_between", 0),
+        num_moments=config.get("num_moments", 1)
     ).to(device)
     
     # Load the trained weights

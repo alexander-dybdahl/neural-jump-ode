@@ -311,7 +311,8 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
         hidden_dim=config["hidden_dim"],
         output_dim=config["output_dim"],
         dt_between_obs=config.get("dt_between_obs"),
-        n_steps_between=config.get("n_steps_between", 0)
+        n_steps_between=config.get("n_steps_between", 0),
+        num_moments=config.get("num_moments", 1)
     )
     
     # Optimizer

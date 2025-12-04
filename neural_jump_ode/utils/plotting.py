@@ -100,13 +100,15 @@ def plot_single_trajectory_with_condexp(
     # Build model prediction on full grid by simulating the NJ-ODE dynamics
     model.eval()
     device = next(model.parameters()).device
+    num_moments = getattr(model, 'num_moments', 1)
     
     # Prepare observation data
     obs_times_tensor = obs_times.to(device)
     obs_values_tensor = obs_values.unsqueeze(-1).to(device)  # Add feature dimension
     
     # We will build model_full by explicitly simulating the NJ-ODE on times_full
-    model_full = torch.zeros_like(times_full)
+    model_full_mean = torch.zeros_like(times_full)
+    model_full_var = torch.zeros_like(times_full) if num_moments > 1 else None
     times_full_device = times_full.to(device)
     
     with torch.no_grad():
@@ -116,8 +118,11 @@ def plot_single_trajectory_with_condexp(
             T_next = obs_times[i + 1]
             x_i = obs_values[i].unsqueeze(0).unsqueeze(-1).to(device)  # (1, 1)
             
-            # Jump at T_i
-            h = model.jump_nn(x_i)
+            # Jump at T_i - handle multiple moments
+            if num_moments == 1:
+                h = model.jump_nn(x_i)
+            else:
+                h_list = [model.jump_nns[m](x_i) for m in range(num_moments)]
             t_cur = T_i.to(device)
             
             # Indices of fine times in [T_i, T_next]
@@ -131,11 +136,22 @@ def plot_single_trajectory_with_condexp(
                 dt = (t_target - t_cur) / float(n_sub)
                 for _ in range(n_sub):
                     t_new = t_cur + dt
-                    h = model.euler_step(h, x_i, t_cur, t_new)
+                    if num_moments == 1:
+                        h = model.euler_step(h, x_i, t_cur, t_new)
+                    else:
+                        h_list = model.euler_step(h_list, x_i, t_cur, t_new)
                     t_cur = t_new
                 
-                y_t = model.output_nn(h)  # (1, 1)
-                model_full[idx_interval[j]] = y_t.squeeze().cpu()
+                # Extract outputs for each moment
+                if num_moments == 1:
+                    y_t = model.output_nn(h)  # (1, 1)
+                    model_full_mean[idx_interval[j]] = y_t.squeeze().cpu()
+                else:
+                    y_mean = model.output_nns[0](h_list[0])  # (1, 1)
+                    model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
+                    if num_moments > 1:
+                        y_var = model.output_nns[1](h_list[1])  # (1, 1) 
+                        model_full_var[idx_interval[j]] = y_var.squeeze().cpu()
         
         # Handle times after the last observation
         if len(obs_times) > 0:
@@ -143,7 +159,10 @@ def plot_single_trajectory_with_condexp(
             x_last = obs_values[-1].unsqueeze(0).unsqueeze(-1).to(device)  # (1, 1)
             
             # Jump at T_last
-            h = model.jump_nn(x_last)
+            if num_moments == 1:
+                h = model.jump_nn(x_last)
+            else:
+                h_list = [model.jump_nns[m](x_last) for m in range(num_moments)]
             t_cur = T_last.to(device)
             
             # Indices of fine times > T_last
@@ -157,11 +176,22 @@ def plot_single_trajectory_with_condexp(
                 dt = (t_target - t_cur) / float(n_sub)
                 for _ in range(n_sub):
                     t_new = t_cur + dt
-                    h = model.euler_step(h, x_last, t_cur, t_new)
+                    if num_moments == 1:
+                        h = model.euler_step(h, x_last, t_cur, t_new)
+                    else:
+                        h_list = model.euler_step(h_list, x_last, t_cur, t_new)
                     t_cur = t_new
                 
-                y_t = model.output_nn(h)  # (1, 1)
-                model_full[idx_interval[j]] = y_t.squeeze().cpu()
+                # Extract outputs for each moment
+                if num_moments == 1:
+                    y_t = model.output_nn(h)  # (1, 1)
+                    model_full_mean[idx_interval[j]] = y_t.squeeze().cpu()
+                else:
+                    y_mean = model.output_nns[0](h_list[0])  # (1, 1)
+                    model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
+                    if num_moments > 1:
+                        y_var = model.output_nns[1](h_list[1])  # (1, 1)
+                        model_full_var[idx_interval[j]] = y_var.squeeze().cpu()
     
     # Create the plot
     plt.figure(figsize=(12, 8))
@@ -170,18 +200,33 @@ def plot_single_trajectory_with_condexp(
     times_np = times_full.numpy()
     X_np = X_full.numpy()
     ce_np = ce_full.numpy()
-    model_np = model_full.numpy()
+    model_mean_np = model_full_mean.numpy()
     obs_times_np = obs_times.numpy()
     obs_values_np = obs_values.numpy()
     
+    # Plot basic paths
     plt.plot(times_np, X_np, 'b-', label='True Path', linewidth=1.5)
-    plt.plot(times_np, model_np, 'r-', label='Model Path', linewidth=1.5)
+    plt.plot(times_np, model_mean_np, 'r-', label='Model Mean', linewidth=1.5)
     plt.plot(times_np, ce_np, 'g:', label='True Conditional Expectation', linewidth=2)
     plt.scatter(obs_times_np, obs_values_np, c='black', s=30, label='Observations', zorder=5)
     
+    # Add variance bands if available
+    if model_full_var is not None:
+        model_var_np = model_full_var.numpy()
+        model_std_np = np.sqrt(np.maximum(model_var_np, 0))  # Ensure non-negative
+        
+        upper_band = model_mean_np + 2 * model_std_np
+        lower_band = model_mean_np - 2 * model_std_np
+        
+        plt.fill_between(times_np, lower_band, upper_band, 
+                        color='red', alpha=0.2, label='Model ±2σ')
+    
     plt.xlabel('Time')
     plt.ylabel('Value')
-    plt.title(f'{process_type.replace("_", " ").title()} Process - Model vs True Conditional Expectation')
+    title = f'{process_type.replace("_", " ").title()} Process - Model vs True Conditional Expectation'
+    if model_full_var is not None:
+        title += ' (with Variance)'
+    plt.title(title)
     plt.legend()
     plt.grid(True, alpha=0.3)
     

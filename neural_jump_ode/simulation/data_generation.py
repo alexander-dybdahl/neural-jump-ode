@@ -370,3 +370,148 @@ def heston_condexp_at_obs(
     """
     # Use Black-Scholes formula as mentioned in the appendix
     return bs_condexp_at_obs(batch_times, batch_values, mu)
+
+
+# Conditional variance functions for multiple moments
+def bs_condvar_at_obs(
+    batch_times: List[torch.Tensor],
+    batch_values: List[torch.Tensor],
+    mu: float,
+    sigma: float,
+) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    """
+    Compute conditional variance for Black-Scholes process.
+    For BS: Var[X_t | X_s] = X_s^2 * (exp(sigma^2*(t-s)) - 1) * exp(2*mu*(t-s))
+    """
+    var_true = []
+    var_true_before = []
+    
+    for times, values in zip(batch_times, batch_values):
+        n_obs = len(times)
+        var = torch.zeros_like(values)
+        var_before = torch.zeros_like(values)
+        
+        for i in range(n_obs):
+            # At observation time, variance is 0 (we know the value exactly)
+            var[i] = torch.zeros_like(values[i])
+            
+            if i > 0:
+                # Before observation, predict variance using previous observation
+                dt = times[i] - times[i-1]
+                X_prev = values[i-1]
+                var_before[i] = X_prev**2 * (torch.exp(sigma**2 * dt) - 1) * torch.exp(2 * mu * dt)
+            else:
+                var_before[i] = torch.zeros_like(values[i])
+        
+        var_true.append(var)
+        var_true_before.append(var_before)
+    
+    return var_true, var_true_before
+
+
+def ou_condvar_at_obs(
+    batch_times: List[torch.Tensor],
+    batch_values: List[torch.Tensor],
+    theta: float,
+    sigma: float,
+) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    """
+    Compute conditional variance for Ornstein-Uhlenbeck process.
+    For OU: Var[X_t | X_s] = sigma^2/(2*theta) * (1 - exp(-2*theta*(t-s)))
+    """
+    var_true = []
+    var_true_before = []
+    
+    for times, values in zip(batch_times, batch_values):
+        n_obs = len(times)
+        var = torch.zeros_like(values)
+        var_before = torch.zeros_like(values)
+        
+        for i in range(n_obs):
+            # At observation time, variance is 0 (we know the value exactly)
+            var[i] = torch.zeros_like(values[i])
+            
+            if i > 0:
+                # Before observation, compute conditional variance
+                dt = times[i] - times[i-1]
+                conditional_var = sigma**2 / (2 * theta) * (1 - torch.exp(-2 * theta * dt))
+                var_before[i] = torch.full_like(values[i], conditional_var)
+            else:
+                var_before[i] = torch.zeros_like(values[i])
+        
+        var_true.append(var)
+        var_true_before.append(var_before)
+    
+    return var_true, var_true_before
+
+
+def heston_condvar_at_obs(
+    batch_times: List[torch.Tensor],
+    batch_values: List[torch.Tensor],
+    mu: float,
+    sigma: float,  # Approximation parameter for variance
+) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    """
+    Compute conditional variance for Heston process.
+    Simplified approximation using Black-Scholes variance formula.
+    """
+    # Use Black-Scholes variance as approximation
+    return bs_condvar_at_obs(batch_times, batch_values, mu, sigma)
+
+
+def get_conditional_moments_at_obs(
+    batch_times: List[torch.Tensor],
+    batch_values: List[torch.Tensor],
+    process_type: str,
+    num_moments: int = 1,
+    **process_params
+) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    """
+    Get conditional expectations for multiple moments.
+    Returns tensors of shape (n_i, d_x, num_moments).
+    """
+    moments_true = []
+    moments_true_before = []
+    
+    for times, values in zip(batch_times, batch_values):
+        n_obs, d_x = values.shape
+        moments = torch.zeros(n_obs, d_x, num_moments)
+        moments_before = torch.zeros(n_obs, d_x, num_moments)
+        
+        # First moment (mean)
+        if process_type == "black_scholes":
+            mean_true, mean_before = bs_condexp_at_obs([times], [values], process_params.get("mu", 0.0))
+        elif process_type == "ornstein_uhlenbeck":
+            mean_true, mean_before = ou_condexp_at_obs([times], [values], 
+                                                       process_params.get("theta", 1.0), 
+                                                       process_params.get("mu", 0.0))
+        elif process_type == "heston":
+            mean_true, mean_before = heston_condexp_at_obs([times], [values], process_params.get("mu", 0.0))
+        
+        moments[:, :, 0] = mean_true[0]
+        moments_before[:, :, 0] = mean_before[0]
+        
+        # Second moment (variance) if requested
+        if num_moments > 1:
+            if process_type == "black_scholes":
+                var_true, var_before = bs_condvar_at_obs([times], [values], 
+                                                         process_params.get("mu", 0.0), 
+                                                         process_params.get("sigma", 0.2))
+            elif process_type == "ornstein_uhlenbeck":
+                var_true, var_before = ou_condvar_at_obs([times], [values], 
+                                                         process_params.get("theta", 1.0),
+                                                         process_params.get("sigma", 0.3))
+            elif process_type == "heston":
+                var_true, var_before = heston_condvar_at_obs([times], [values], 
+                                                             process_params.get("mu", 0.0),
+                                                             process_params.get("xi", 0.5))
+            
+            moments[:, :, 1] = var_true[0]
+            moments_before[:, :, 1] = var_before[0]
+        
+        # Higher moments would be added here if needed
+        
+        moments_true.append(moments)
+        moments_true_before.append(moments_before)
+    
+    return moments_true, moments_true_before
