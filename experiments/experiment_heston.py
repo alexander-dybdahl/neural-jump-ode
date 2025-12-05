@@ -26,20 +26,23 @@ def main():
     config = {
         "experiment_name": "njode_heston",
         "input_dim": 1,
-        "hidden_dim": 32,
+        "hidden_dim": 50,  # Match reference architecture
         "output_dim": 1,
+        "n_hidden_layers": 1,  # Number of hidden layers in each NN component
+        "activation": "relu",  # Activation function: 'relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'
         "n_steps_between": 5,
         "learning_rate": 1e-3,
-        "n_epochs": 200,
-        "print_every": 10,
+        "n_epochs": 50,  # Much fewer epochs like reference
+        "batch_size": 128,  # Larger batch size
+        "print_every": 5,
         "device": "auto",
         "ignore_first_continuity": True,
         "num_moments": 2,  # Learn both mean and variance
-        "moment_weights": [1.0, 1.0],  # Equal weighting for mean and variance
+        "moment_weights": [1.0, 3.0],  # Higher weight on variance to force learning near zero
         "data": {
             "process_type": "heston",
-            "n_train": 200,
-            "n_val": 50,
+            "n_train": 1000,  # Much more training data
+            "n_val": 200,
             "obs_fraction": 0.1,  # About 10% of grid points as observations
             "cache_data": True,  # Cache data for performance
             "mu": 0.5,
@@ -88,7 +91,9 @@ def main():
         hidden_dim=config["hidden_dim"],
         output_dim=config["output_dim"],
         n_steps_between=config.get("n_steps_between", 0),
-        num_moments=config.get("num_moments", 1)
+        num_moments=config.get("num_moments", 1),
+        n_hidden_layers=config.get("n_hidden_layers", 1),
+        activation=config.get("activation", "relu")
     ).to(device)
     
     # Load the trained weights

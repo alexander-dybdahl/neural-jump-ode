@@ -154,7 +154,7 @@ class Trainer:
                 history["val_loss"].append(val_loss)
             
             # Compute relative loss less frequently to speed up training
-            if compute_relative_loss and epoch % max(10, print_every) == 0:
+            if compute_relative_loss and epoch % print_every == 0:
                 try:
                     self.model.eval()
                     with torch.no_grad():
@@ -309,7 +309,9 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
         output_dim=config["output_dim"],
         dt_between_obs=config.get("dt_between_obs"),
         n_steps_between=config.get("n_steps_between", 0),
-        num_moments=config.get("num_moments", 1)
+        num_moments=config.get("num_moments", 1),
+        n_hidden_layers=config.get("n_hidden_layers", 1),
+        activation=config.get("activation", "relu")
     )
     
     # Optimizer

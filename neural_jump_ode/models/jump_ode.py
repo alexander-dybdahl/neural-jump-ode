@@ -2,15 +2,24 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+# Activation function mapping
+ACTIVATION_FUNCTIONS = {
+    'relu': nn.ReLU,
+    'tanh': nn.Tanh,
+    'sigmoid': nn.Sigmoid,
+    'elu': nn.ELU,
+    'leaky_relu': nn.LeakyReLU,
+    'selu': nn.SELU,
+}
+
 class JumpNN(nn.Module):
-    def __init__(self, input_dim, hidden_dim):
+    def __init__(self, input_dim, hidden_dim, n_hidden_layers=1, activation='relu'):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
-        )
+        act_fn = ACTIVATION_FUNCTIONS.get(activation.lower(), nn.ReLU)
+        layers = [nn.Linear(input_dim, hidden_dim), act_fn()]
+        for _ in range(n_hidden_layers):
+            layers.extend([nn.Linear(hidden_dim, hidden_dim), act_fn()])
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x):
         # x: (batch, d_x)
@@ -21,13 +30,14 @@ class ODEFunc(nn.Module):
     """
     f_theta(h, x_last, t_last, dt_elapsed) -> dh/dt
     """
-    def __init__(self, hidden_dim, input_dim):
+    def __init__(self, hidden_dim, input_dim, n_hidden_layers=1, activation='relu'):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(hidden_dim + input_dim + 2, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim),
-        )
+        act_fn = ACTIVATION_FUNCTIONS.get(activation.lower(), nn.ReLU)
+        layers = [nn.Linear(hidden_dim + input_dim + 2, hidden_dim), act_fn()]
+        for _ in range(n_hidden_layers - 1):
+            layers.extend([nn.Linear(hidden_dim, hidden_dim), act_fn()])
+        layers.append(nn.Linear(hidden_dim, hidden_dim))
+        self.net = nn.Sequential(*layers)
 
     def forward(self, t, h, x_last, t_last):
         # t, t_last: scalar tensors
@@ -41,13 +51,14 @@ class ODEFunc(nn.Module):
 
 
 class OutputNN(nn.Module):
-    def __init__(self, hidden_dim, output_dim):
+    def __init__(self, hidden_dim, output_dim, n_hidden_layers=1, activation='relu'):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, output_dim),
-        )
+        act_fn = ACTIVATION_FUNCTIONS.get(activation.lower(), nn.ReLU)
+        layers = []
+        for _ in range(n_hidden_layers):
+            layers.extend([nn.Linear(hidden_dim, hidden_dim), act_fn()])
+        layers.append(nn.Linear(hidden_dim, output_dim))
+        self.net = nn.Sequential(*layers)
 
     def forward(self, h):
         return self.net(h)
@@ -55,20 +66,22 @@ class OutputNN(nn.Module):
 
 class NeuralJumpODE(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim,
-                 dt_between_obs=None, n_steps_between=0, num_moments=1):
+                 dt_between_obs=None, n_steps_between=0, num_moments=1, n_hidden_layers=1, activation='relu'):
         """
         dt_between_obs: size of Euler step for interpolation between obs
         n_steps_between: number of intermediate steps between two obs times
                          if 0, only evaluate at obs times
         num_moments: number of moments to learn (1=mean only, 2=mean+variance, etc.)
+        n_hidden_layers: number of hidden layers in each neural network component (default=1)
+        activation: activation function to use ('relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu')
         """
         super().__init__()
         self.num_moments = num_moments
         
         # Create separate networks for each moment
-        self.jump_nns = nn.ModuleList([JumpNN(input_dim, hidden_dim) for _ in range(num_moments)])
-        self.ode_funcs = nn.ModuleList([ODEFunc(hidden_dim, input_dim) for _ in range(num_moments)])
-        self.output_nns = nn.ModuleList([OutputNN(hidden_dim, output_dim) for _ in range(num_moments)])
+        self.jump_nns = nn.ModuleList([JumpNN(input_dim, hidden_dim, n_hidden_layers, activation) for _ in range(num_moments)])
+        self.ode_funcs = nn.ModuleList([ODEFunc(hidden_dim, input_dim, n_hidden_layers, activation) for _ in range(num_moments)])
+        self.output_nns = nn.ModuleList([OutputNN(hidden_dim, output_dim, n_hidden_layers, activation) for _ in range(num_moments)])
         
         self.n_steps_between = n_steps_between
         self.dt_between_obs = dt_between_obs
