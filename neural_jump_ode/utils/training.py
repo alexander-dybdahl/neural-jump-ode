@@ -14,11 +14,13 @@ from ..models.jump_ode import NeuralJumpODE, nj_ode_loss
 
 class Trainer:
     def __init__(self, model: NeuralJumpODE, optimizer: optim.Optimizer,
-                 device: str = "cpu", ignore_first_continuity: bool = False):
+                 device: str = "cpu", ignore_first_continuity: bool = False, 
+                 moment_weights: Optional[List[float]] = None):
         self.model = model
         self.optimizer = optimizer
         self.device = device
         self.ignore_first_continuity = ignore_first_continuity
+        self.moment_weights = torch.tensor(moment_weights, device=device) if moment_weights else None
         self.model.to(device)
         
         self.train_losses = []
@@ -39,7 +41,7 @@ class Trainer:
         preds, preds_before = self.model(batch_times, batch_values)
         
         # Compute loss
-        loss = nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=self.ignore_first_continuity)
+        loss = nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=self.ignore_first_continuity, moment_weights=self.moment_weights)
         
         # Backward pass
         loss.backward()
@@ -61,7 +63,7 @@ class Trainer:
             preds, preds_before = self.model(batch_times, batch_values)
             
             # Compute loss
-            loss = nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=self.ignore_first_continuity)
+            loss = nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=self.ignore_first_continuity, moment_weights=self.moment_weights)
             
         return loss.item()
     
@@ -158,7 +160,7 @@ class Trainer:
                     with torch.no_grad():
                         # Model predictions
                         preds, preds_before = self.model(eval_batch_times, eval_batch_values)
-                        L_model = nj_ode_loss(eval_batch_times, eval_batch_values, preds, preds_before).item()
+                        L_model = nj_ode_loss(eval_batch_times, eval_batch_values, preds, preds_before, moment_weights=self.moment_weights).item()
                         
                         # True conditional expectations for multiple moments
                         from ..simulation.data_generation import get_conditional_moments_at_obs
@@ -180,7 +182,7 @@ class Trainer:
                         y_true = [y.to(self.device) for y in y_true]
                         y_true_before = [y.to(self.device) for y in y_true_before]
                         
-                        L_true = nj_ode_loss(eval_batch_times, eval_batch_values, y_true, y_true_before).item()
+                        L_true = nj_ode_loss(eval_batch_times, eval_batch_values, y_true, y_true_before, moment_weights=self.moment_weights).item()
                         
                         relative_loss = (L_model - L_true) / max(L_true, 1e-8)  # Avoid division by zero
                         history["relative_loss"].append(relative_loss)
@@ -314,7 +316,7 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
     optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
     
     # Trainer
-    trainer = Trainer(model, optimizer, device, ignore_first_continuity=config.get("ignore_first_continuity", False))
+    trainer = Trainer(model, optimizer, device, ignore_first_continuity=config.get("ignore_first_continuity", False), moment_weights=config.get("moment_weights"))
     
     # Data loaders
     train_data_fn, val_data_fn = create_data_loaders(**config["data"])

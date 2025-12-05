@@ -35,6 +35,7 @@ def main():
         "device": "auto",
         "ignore_first_continuity": True,
         "num_moments": 2,  # Learn both mean and variance
+        "moment_weights": [1.0, 1.0],  # Equal weighting for mean and variance
         "data": {
             "process_type": "black_scholes",
             "n_train": 200,
