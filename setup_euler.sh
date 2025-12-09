@@ -6,7 +6,8 @@ echo "=== Setting up Neural Jump ODE on Euler ==="
 
 # Load modules
 echo "Loading modules..."
-module load gcc/13.2.0 python/3.11.6
+module load stack/2024-06 gcc/12.2.0
+module load python/3.11.6
 
 # Show loaded modules
 module list
@@ -34,8 +35,8 @@ echo ""
 echo "To submit jobs, use:"
 echo "  sbatch run_heston.sh          # Run Heston experiment"
 echo "  sbatch run_black_scholes.sh   # Run Black-Scholes experiment"
-echo "  sbatch run_ou.sh               # Run Ornstein-Uhlenbeck experiment"
-echo "  sbatch run_gpu.sh              # Run with GPU (larger problem)"
+echo "  sbatch run_ou.sh              # Run Ornstein-Uhlenbeck experiment"
+echo "  sbatch run_gpu.sh             # Run with GPU (larger problem)"
 echo ""
 echo "To check job status:"
 echo "  squeue -u \$USER"

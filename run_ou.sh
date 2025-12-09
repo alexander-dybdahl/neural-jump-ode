@@ -9,7 +9,8 @@
 #SBATCH --tmp=4096
 
 # Load modules
-module load gcc/13.2.0 python/3.11.6
+module load stack/2024-06 gcc/12.2.0
+module load python/3.11.6
 
 # Create logs directory if it doesn't exist
 mkdir -p logs
