@@ -131,11 +131,44 @@ dV_t = κ(θ - V_t) dt + ξ √V_t dW2_t
 
 ## Features
 
+- **Multiple Moments**: Learn mean and variance (or higher moments) simultaneously
+- **Configurable Architecture**: Adjustable hidden layers, activation functions, and network dimensions
 - **Relative Loss Tracking**: Compares model performance to theoretical conditional expectations
-- **Figure 1 Style Plots**: Trajectory comparisons with true paths, model predictions, and conditional expectations  
-- **Figure 2 Style Plots**: Relative loss curves across different processes
+- **Training History Plots**: Track loss curves across epochs
+- **Trajectory Comparison Plots**: Visualize true paths, model predictions, and conditional expectations
+- **Relative Loss Plots**: Compare model performance across different processes
 - **GPU Support**: Automatic CUDA detection and acceleration
 - **Checkpoint Resuming**: Automatic training continuation from interruptions
+- **Command-Line Interface**: Configure experiments via argparse for all parameters
+
+## Running on HPC Clusters
+
+The project includes SLURM job scripts for running on ETH Euler cluster:
+
+```bash
+# Initial setup on cluster
+bash setup_euler.sh
+
+# Submit single job
+sbatch run_heston.sh
+sbatch run_black_scholes.sh
+sbatch run_ou.sh
+
+# Submit GPU job for larger experiments
+sbatch run_gpu.sh
+
+# Run hyperparameter search (array job)
+sbatch run_array_job.sh
+
+# Monitor job progress
+squeue -u $USER
+tail -f logs/heston_JOBID.out
+
+# Download results to local machine
+scp -r [your_nethz]@euler.ethz.ch:~/neural-jump-ode/runs ./euler_results
+```
+
+See `EULER_GUIDE.md` for detailed instructions on cluster usage.
 
 ## Requirements
 
@@ -144,11 +177,8 @@ dV_t = κ(θ - V_t) dt + ξ √V_t dW2_t
 - NumPy >= 1.20.0
 - Matplotlib >= 3.3.0
 - SciPy >= 1.7.0
+- Seaborn >= 0.11.0
 
 ## Development
 
-This project was developed as part of the Seminar in Computational Finance for CSE at ETH Zurich.
-
-## License
-
-[Add license information]
+This project was developed as part of a Seminar in Computational Finance course at ETH Zurich.
