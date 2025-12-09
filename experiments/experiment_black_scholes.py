@@ -3,6 +3,7 @@ Black Scholes experiment using the new SDE simulation setup.
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 # Add project root to path
@@ -19,38 +20,77 @@ from neural_jump_ode.models import NeuralJumpODE
 import torch
 
 
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Black Scholes Neural Jump ODE Experiment')
+    
+    # Model architecture
+    parser.add_argument('--hidden-dim', type=int, default=32, help='Hidden dimension size')
+    parser.add_argument('--n-hidden-layers', type=int, default=1, help='Number of hidden layers')
+    parser.add_argument('--activation', type=str, default='relu', 
+                        choices=['relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'],
+                        help='Activation function')
+    parser.add_argument('--n-steps-between', type=int, default=5, help='Euler steps between observations')
+    
+    # Training parameters
+    parser.add_argument('--learning-rate', type=float, default=1e-3, help='Learning rate')
+    parser.add_argument('--weight-decay', type=float, default=5e-4, help='Weight decay')
+    parser.add_argument('--n-epochs', type=int, default=200, help='Number of epochs')
+    parser.add_argument('--batch-size', type=int, default=128, help='Batch size')
+    parser.add_argument('--print-every', type=int, default=5, help='Print frequency')
+    parser.add_argument('--device', type=str, default='auto', help='Device (auto/cpu/cuda)')
+    
+    # Moment learning
+    parser.add_argument('--num-moments', type=int, default=2, help='Number of moments to learn')
+    parser.add_argument('--moment-weights', type=float, nargs='+', default=[1.0, 3.0], 
+                        help='Weights for each moment loss')
+    
+    # Data parameters
+    parser.add_argument('--n-train', type=int, default=1000, help='Number of training trajectories')
+    parser.add_argument('--n-val', type=int, default=200, help='Number of validation trajectories')
+    parser.add_argument('--obs-fraction', type=float, default=0.1, help='Fraction of points observed')
+    parser.add_argument('--mu', type=float, default=0.5, help='Black Scholes drift parameter')
+    parser.add_argument('--sigma', type=float, default=0.2, help='Black Scholes volatility parameter')
+    parser.add_argument('--T', type=float, default=1.0, help='Time horizon')
+    parser.add_argument('--n-steps', type=int, default=100, help='Number of time steps')
+    parser.add_argument('--x0', type=float, default=1.0, help='Initial value')
+    
+    return parser.parse_args()
+
+
 def main():
     """Run a Black Scholes experiment."""
+    args = parse_args()
     
-    # Experiment configuration matching the paper
+    # Experiment configuration with command-line overrides
     config = {
         "experiment_name": "njode_black_scholes",
         "input_dim": 1,
-        "hidden_dim": 32,  # Match reference architecture
+        "hidden_dim": args.hidden_dim,
         "output_dim": 1,
-        "n_hidden_layers": 1,  # Number of hidden layers in each NN component
-        "activation": "relu",  # Activation function: 'relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'
-        "n_steps_between": 5,
-        "learning_rate": 1e-3,
-        "weight_decay": 5e-4,
-        "n_epochs": 200,  # Much fewer epochs like reference
-        "batch_size": 128,  # Larger batch size
-        "print_every": 5,
-        "device": "auto",
+        "n_hidden_layers": args.n_hidden_layers,
+        "activation": args.activation,
+        "n_steps_between": args.n_steps_between,
+        "learning_rate": args.learning_rate,
+        "weight_decay": args.weight_decay,
+        "n_epochs": args.n_epochs,
+        "batch_size": args.batch_size,
+        "print_every": args.print_every,
+        "device": args.device,
         "ignore_first_continuity": True,
-        "num_moments": 2,  # Learn both mean and variance
-        "moment_weights": [1.0, 3.0],  # Higher weight on variance to force learning near zero
+        "num_moments": args.num_moments,
+        "moment_weights": args.moment_weights,
         "data": {
             "process_type": "black_scholes",
-            "n_train": 1000,  # Much more training data
-            "n_val": 200,
-            "obs_fraction": 0.1,  # About 10% of grid points as observations
-            "cache_data": True,  # Cache data for performance
-            "mu": 0.5,
-            "sigma": 0.2,
-            "T": 1.0,
-            "n_steps": 100,
-            "x0": 1.0,
+            "n_train": args.n_train,
+            "n_val": args.n_val,
+            "obs_fraction": args.obs_fraction,
+            "cache_data": True,
+            "mu": args.mu,
+            "sigma": args.sigma,
+            "T": args.T,
+            "n_steps": args.n_steps,
+            "x0": args.x0,
         },
     }
     
