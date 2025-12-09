@@ -315,7 +315,8 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
         n_steps_between=config.get("n_steps_between", 0),
         num_moments=config.get("num_moments", 1),
         n_hidden_layers=config.get("n_hidden_layers", 1),
-        activation=config.get("activation", "relu")
+        activation=config.get("activation", "relu"),
+        shared_network=config.get("shared_network", False)
     )
     
     # Optimizer

@@ -66,7 +66,8 @@ class OutputNN(nn.Module):
 
 class NeuralJumpODE(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim,
-                 dt_between_obs=None, n_steps_between=0, num_moments=1, n_hidden_layers=1, activation='relu'):
+                 dt_between_obs=None, n_steps_between=0, num_moments=1, n_hidden_layers=1, activation='relu',
+                 shared_network=False):
         """
         dt_between_obs: size of Euler step for interpolation between obs
         n_steps_between: number of intermediate steps between two obs times
@@ -74,28 +75,53 @@ class NeuralJumpODE(nn.Module):
         num_moments: number of moments to learn (1=mean only, 2=mean+variance, etc.)
         n_hidden_layers: number of hidden layers in each neural network component (default=1)
         activation: activation function to use ('relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu')
+        shared_network: if True, use single shared network for all moments; if False, separate networks (default=False)
         """
         super().__init__()
         self.num_moments = num_moments
+        self.shared_network = shared_network
         
-        # Create separate networks for each moment
-        self.jump_nns = nn.ModuleList([JumpNN(input_dim, hidden_dim, n_hidden_layers, activation) for _ in range(num_moments)])
-        self.ode_funcs = nn.ModuleList([ODEFunc(hidden_dim, input_dim, n_hidden_layers, activation) for _ in range(num_moments)])
-        self.output_nns = nn.ModuleList([OutputNN(hidden_dim, output_dim, n_hidden_layers, activation) for _ in range(num_moments)])
+        if shared_network:
+            # Single shared network for all moments
+            self.jump_nn = JumpNN(input_dim, hidden_dim, n_hidden_layers, activation)
+            self.ode_func = ODEFunc(hidden_dim, input_dim, n_hidden_layers, activation)
+            # Output network needs to output all moments at once
+            self.output_nn = OutputNN(hidden_dim, output_dim * num_moments, n_hidden_layers, activation)
+            self.jump_nns = None
+            self.ode_funcs = None
+            self.output_nns = None
+        else:
+            # Create separate networks for each moment
+            self.jump_nns = nn.ModuleList([JumpNN(input_dim, hidden_dim, n_hidden_layers, activation) for _ in range(num_moments)])
+            self.ode_funcs = nn.ModuleList([ODEFunc(hidden_dim, input_dim, n_hidden_layers, activation) for _ in range(num_moments)])
+            self.output_nns = nn.ModuleList([OutputNN(hidden_dim, output_dim, n_hidden_layers, activation) for _ in range(num_moments)])
+            self.jump_nn = None
+            self.ode_func = None
+            self.output_nn = None
         
         self.n_steps_between = n_steps_between
         self.dt_between_obs = dt_between_obs
+        self.output_dim = output_dim
 
     def euler_step(self, h_list, x_last, t_last, t_next):
         """
         Single Euler step from t_last to t_next for all moments.
         """
-        new_h_list = []
-        for i in range(self.num_moments):
-            dh = self.ode_funcs[i](t_next, h_list[i], x_last, t_last)
+        if self.shared_network:
+            # Single hidden state for shared network
+            h = h_list[0]
+            dh = self.ode_func(t_next, h, x_last, t_last)
             dt = (t_next - t_last)
-            new_h_list.append(h_list[i] + dt * dh)
-        return new_h_list
+            new_h = h + dt * dh
+            return [new_h]  # Return as list for consistency
+        else:
+            # Separate hidden states for each moment
+            new_h_list = []
+            for i in range(self.num_moments):
+                dh = self.ode_funcs[i](t_next, h_list[i], x_last, t_last)
+                dt = (t_next - t_last)
+                new_h_list.append(h_list[i] + dt * dh)
+            return new_h_list
 
     def forward_single(self, times, values):
         """
@@ -110,7 +136,7 @@ class NeuralJumpODE(nn.Module):
         """
         n_obs, d_x = values.shape
         device = values.device
-        d_y = self.output_nns[0].net[-1].out_features
+        d_y = self.output_dim
 
         obs_pred = []
         obs_pred_before = []
@@ -122,12 +148,19 @@ class NeuralJumpODE(nn.Module):
             t_i = times[i]
             x_i = values[i].unsqueeze(0)  # shape (1, d_x)
 
-            # jump: set hidden state from observation for each moment
-            h_list = [self.jump_nns[m](x_i) for m in range(self.num_moments)]  # List of (1, d_h)
-            y_list = [self.output_nns[m](h_list[m]) for m in range(self.num_moments)]  # List of (1, d_y)
-            
-            # Stack moments: (1, d_y, num_moments)
-            y_i = torch.stack(y_list, dim=-1)
+            if self.shared_network:
+                # Shared network: single hidden state, multi-output
+                h = self.jump_nn(x_i)  # (1, d_h)
+                y_flat = self.output_nn(h)  # (1, d_y * num_moments)
+                # Reshape to (1, d_y, num_moments)
+                y_i = y_flat.view(1, d_y, self.num_moments)
+                h_list = [h]  # Store as list for consistency
+            else:
+                # Separate networks: each moment has its own network
+                h_list = [self.jump_nns[m](x_i) for m in range(self.num_moments)]  # List of (1, d_h)
+                y_list = [self.output_nns[m](h_list[m]) for m in range(self.num_moments)]  # List of (1, d_y)
+                # Stack moments: (1, d_y, num_moments)
+                y_i = torch.stack(y_list, dim=-1)
 
             obs_pred.append(y_i.squeeze(0))  # (d_y, num_moments)
             obs_pred_before.append(y_before.squeeze(0))  # (d_y, num_moments)
@@ -156,8 +189,14 @@ class NeuralJumpODE(nn.Module):
                         h_cur_list = self.euler_step(h_cur_list, x_i, t_cur, t_next)
                     h_next_minus_list = h_cur_list
 
-                y_before_list = [self.output_nns[m](h_next_minus_list[m]) for m in range(self.num_moments)]
-                y_before = torch.stack(y_before_list, dim=-1)  # (1, d_y, num_moments)
+                if self.shared_network:
+                    # Shared network: single output
+                    y_before_flat = self.output_nn(h_next_minus_list[0])  # (1, d_y * num_moments)
+                    y_before = y_before_flat.view(1, d_y, self.num_moments)
+                else:
+                    # Separate networks: each moment separately
+                    y_before_list = [self.output_nns[m](h_next_minus_list[m]) for m in range(self.num_moments)]
+                    y_before = torch.stack(y_before_list, dim=-1)  # (1, d_y, num_moments)
 
         obs_pred = torch.stack(obs_pred, dim=0)  # (n_obs, d_y, num_moments)
         obs_pred_before = torch.stack(obs_pred_before, dim=0)  # (n_obs, d_y, num_moments)

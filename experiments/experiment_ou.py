@@ -44,6 +44,8 @@ def parse_args():
     parser.add_argument('--num-moments', type=int, default=2, help='Number of moments to learn')
     parser.add_argument('--moment-weights', type=float, nargs='+', default=[1.0, 3.0], 
                         help='Weights for each moment loss')
+    parser.add_argument('--shared-network', action='store_true', 
+                        help='Use single shared network for all moments (default: separate networks)')
     
     # Data parameters
     parser.add_argument('--n-train', type=int, default=1000, help='Number of training trajectories')
@@ -81,6 +83,7 @@ def main():
         "ignore_first_continuity": True,
         "num_moments": args.num_moments,
         "moment_weights": args.moment_weights,
+        "shared_network": args.shared_network,
         "data": {
             "process_type": "ornstein_uhlenbeck",
             "n_train": args.n_train,
@@ -132,7 +135,8 @@ def main():
         n_steps_between=config.get("n_steps_between", 0),
         num_moments=config.get("num_moments", 1),
         n_hidden_layers=config.get("n_hidden_layers", 1),
-        activation=config.get("activation", "relu")
+        activation=config.get("activation", "relu"),
+        shared_network=config.get("shared_network", False)
     ).to(device)
     
     # Load the trained weights

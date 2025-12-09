@@ -38,6 +38,7 @@ python experiments/experiment_heston.py \
     --learning-rate 1e-3 \
     --batch-size 128 \
     --print-every 10 \
-    --device cpu
+    --device cpu \
+    --shared-network
 
 echo "Job completed!"
