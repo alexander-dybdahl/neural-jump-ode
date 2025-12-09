@@ -27,27 +27,74 @@ class Trainer:
         self.val_losses = []
         
     def train_epoch(self, batch_times: List[torch.Tensor], 
-                   batch_values: List[torch.Tensor]) -> float:
-        """Train for one epoch."""
+                   batch_values: List[torch.Tensor], batch_size: Optional[int] = None,
+                   shuffle: bool = True) -> float:
+        """
+        Train for one epoch with mini-batching.
+        
+        Args:
+            batch_times: List of observation time tensors for each trajectory
+            batch_values: List of observation value tensors for each trajectory
+            batch_size: Number of trajectories per mini-batch. If None, use all data at once.
+            shuffle: Whether to shuffle trajectories before creating mini-batches
+        
+        Returns:
+            Average loss across all mini-batches
+        """
         self.model.train()
         
-        # Move data to device
-        batch_times = [t.to(self.device) for t in batch_times]
-        batch_values = [v.to(self.device) for v in batch_values]
+        n_trajectories = len(batch_times)
         
-        self.optimizer.zero_grad()
+        # Create indices for trajectories
+        indices = list(range(n_trajectories))
+        if shuffle:
+            import random
+            random.shuffle(indices)
         
-        # Forward pass
-        preds, preds_before = self.model(batch_times, batch_values)
+        # If no batch_size specified, process all at once
+        if batch_size is None or batch_size >= n_trajectories:
+            batch_times = [batch_times[i].to(self.device) for i in indices]
+            batch_values = [batch_values[i].to(self.device) for i in indices]
+            
+            self.optimizer.zero_grad()
+            preds, preds_before = self.model(batch_times, batch_values)
+            loss = nj_ode_loss(batch_times, batch_values, preds, preds_before, 
+                             ignore_first_continuity=self.ignore_first_continuity, 
+                             moment_weights=self.moment_weights)
+            loss.backward()
+            self.optimizer.step()
+            
+            return loss.item()
         
-        # Compute loss
-        loss = nj_ode_loss(batch_times, batch_values, preds, preds_before, ignore_first_continuity=self.ignore_first_continuity, moment_weights=self.moment_weights)
+        # Mini-batch training
+        total_loss = 0.0
+        n_batches = 0
         
-        # Backward pass
-        loss.backward()
-        self.optimizer.step()
+        for start_idx in range(0, n_trajectories, batch_size):
+            end_idx = min(start_idx + batch_size, n_trajectories)
+            mini_batch_indices = indices[start_idx:end_idx]
+            
+            # Extract mini-batch and move to device
+            mini_batch_times = [batch_times[i].to(self.device) for i in mini_batch_indices]
+            mini_batch_values = [batch_values[i].to(self.device) for i in mini_batch_indices]
+            
+            # Forward pass
+            self.optimizer.zero_grad()
+            preds, preds_before = self.model(mini_batch_times, mini_batch_values)
+            
+            # Compute loss
+            loss = nj_ode_loss(mini_batch_times, mini_batch_values, preds, preds_before,
+                             ignore_first_continuity=self.ignore_first_continuity, 
+                             moment_weights=self.moment_weights)
+            
+            # Backward pass
+            loss.backward()
+            self.optimizer.step()
+            
+            total_loss += loss.item()
+            n_batches += 1
         
-        return loss.item()
+        return total_loss / n_batches
     
     def validate(self, batch_times: List[torch.Tensor], 
                 batch_values: List[torch.Tensor]) -> float:
@@ -68,7 +115,8 @@ class Trainer:
         return loss.item()
     
     def train(self, train_data_fn: Callable, val_data_fn: Optional[Callable] = None,
-              n_epochs: int = 100, print_every: int = 10,
+              n_epochs: int = 100, batch_size: Optional[int] = None, 
+              shuffle: bool = True, print_every: int = 10,
               save_path: Optional[str] = None, resume_from_checkpoint: bool = True,
               config: Optional[Dict] = None) -> Dict:
         """
@@ -78,6 +126,8 @@ class Trainer:
             train_data_fn: Function that returns (batch_times, batch_values) for training
             val_data_fn: Function that returns validation data
             n_epochs: Number of epochs
+            batch_size: Number of trajectories per mini-batch. If None, use all data at once.
+            shuffle: Whether to shuffle trajectories before creating mini-batches
             print_every: Print progress every N epochs
             save_path: Path to save the trained model
             resume_from_checkpoint: If True, resume from existing checkpoint if available
@@ -140,8 +190,9 @@ class Trainer:
             # Get training data
             batch_times, batch_values = train_data_fn()
             
-            # Train
-            train_loss = self.train_epoch(batch_times, batch_values)
+            # Train with mini-batching
+            train_loss = self.train_epoch(batch_times, batch_values, 
+                                         batch_size=batch_size, shuffle=shuffle)
             self.train_losses.append(train_loss)
             history["train_loss"].append(train_loss)
             
@@ -339,6 +390,8 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
         train_data_fn=train_data_fn,
         val_data_fn=val_data_fn,
         n_epochs=config["n_epochs"],
+        batch_size=config.get("batch_size"),
+        shuffle=config.get("shuffle", True),
         print_every=config.get("print_every", 10),
         save_path=str(save_path / "model.pt"),
         resume_from_checkpoint=config.get("resume_from_checkpoint", True),

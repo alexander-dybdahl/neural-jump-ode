@@ -37,6 +37,8 @@ def parse_args():
     parser.add_argument('--weight-decay', type=float, default=5e-4, help='Weight decay')
     parser.add_argument('--n-epochs', type=int, default=200, help='Number of epochs')
     parser.add_argument('--batch-size', type=int, default=128, help='Batch size')
+    parser.add_argument('--no-shuffle', action='store_true',
+                        help='Disable shuffling of trajectories between mini-batches (default: shuffle enabled)')
     parser.add_argument('--print-every', type=int, default=5, help='Print frequency')
     parser.add_argument('--device', type=str, default='auto', help='Device (auto/cpu/cuda)')
     
@@ -48,6 +50,8 @@ def parse_args():
                         help='Use single shared network for all moments (default: separate networks)')
     
     # Data parameters
+    parser.add_argument('--cache-data', action='store_true',
+                        help='Cache training data (reuse same paths each epoch). Default: False (generate fresh paths)')
     parser.add_argument('--n-train', type=int, default=1000, help='Number of training trajectories')
     parser.add_argument('--n-val', type=int, default=200, help='Number of validation trajectories')
     parser.add_argument('--obs-fraction', type=float, default=0.1, help='Fraction of points observed')
@@ -81,6 +85,7 @@ def main():
         "weight_decay": args.weight_decay,
         "n_epochs": args.n_epochs,
         "batch_size": args.batch_size,
+        "shuffle": not args.no_shuffle,
         "print_every": args.print_every,
         "device": args.device,
         "ignore_first_continuity": True,
@@ -92,7 +97,7 @@ def main():
             "n_train": args.n_train,
             "n_val": args.n_val,
             "obs_fraction": args.obs_fraction,
-            "cache_data": True,
+            "cache_data": args.cache_data,
             "mu": args.mu,
             "kappa": args.kappa,
             "theta": args.theta,
