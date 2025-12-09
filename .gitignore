@@ -6,3 +6,12 @@ __pycache__/
 
 # Ignore runs directory and all its contents
 runs/
+
+# Ignore log files from SLURM jobs
+logs/
+*.out
+*.err
+
+# Virtual environment
+venv/
+env/
