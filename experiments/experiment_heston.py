@@ -32,7 +32,8 @@ def main():
         "activation": "relu",  # Activation function: 'relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'
         "n_steps_between": 5,
         "learning_rate": 1e-3,
-        "n_epochs": 50,  # Much fewer epochs like reference
+        "weight_decay": 5e-4,
+        "n_epochs": 200,  # Much fewer epochs like reference
         "batch_size": 128,  # Larger batch size
         "print_every": 5,
         "device": "auto",

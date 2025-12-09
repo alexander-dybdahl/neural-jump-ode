@@ -319,7 +319,7 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
     )
     
     # Optimizer
-    optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
+    optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"], weight_decay=config["weight_decay"])
     
     # Trainer
     trainer = Trainer(model, optimizer, device, ignore_first_continuity=config.get("ignore_first_continuity", False), moment_weights=config.get("moment_weights"))
