@@ -194,7 +194,7 @@ class Trainer:
             epoch_time = time.time() - start_time
             history["epoch_times"].append(epoch_time)
             
-            # Print progress
+            # Print progress and save model
             if epoch % print_every == 0 or epoch == start_epoch:
                 msg = f"Epoch {epoch:4d} | Train Loss: {train_loss:.6f}"
                 if val_loss is not None:
@@ -205,6 +205,10 @@ class Trainer:
                 if start_epoch > 0 and epoch == start_epoch:
                     msg += " (resumed)"
                 print(msg)
+                
+                # Save model checkpoint each time we print
+                if save_path is not None:
+                    self.save_model(save_path, history["epoch_times"], history["relative_loss"])
         
         # Save model
         if save_path is not None:
