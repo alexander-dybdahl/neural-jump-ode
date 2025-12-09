@@ -20,7 +20,7 @@ source venv/bin/activate
 
 # Run experiment
 echo "Running Black-Scholes experiment..."
-python experiments/experiment_black_scholes.py \
+python -u experiments/experiment_black_scholes.py \
     --n-train 1000 \
     --n-val 200 \
     --n-epochs 200 \

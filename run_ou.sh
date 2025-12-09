@@ -20,7 +20,7 @@ source venv/bin/activate
 
 # Run experiment
 echo "Running Ornstein-Uhlenbeck experiment..."
-python experiments/experiment_ou.py \
+python -u experiments/experiment_ou.py \
     --n-train 1000 \
     --n-val 200 \
     --n-epochs 200 \

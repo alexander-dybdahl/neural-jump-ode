@@ -28,7 +28,7 @@ fi
 
 # Run experiment with default parameters
 echo "Running Heston experiment..."
-python experiments/experiment_heston.py \
+python -u experiments/experiment_heston.py \
     --n-train 1000 \
     --n-val 200 \
     --n-epochs 200 \
