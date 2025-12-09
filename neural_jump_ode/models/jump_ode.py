@@ -231,21 +231,39 @@ def nj_ode_loss(
     """
     Neural Jump ODE loss function for mean and variance prediction.
 
-    The loss has two components for each moment:
-    1. Jump term: How well predictions match observations after jumps
-    2. Continuity term: How smooth predictions are before jumps
-    
-    For mean (moment 0): Predicts E[X_t | observations]
-    For variance (moment 1): Predicts Var[X_t | observations] via W where V = W²
+    Notation:
+        X_t  = true observation at time t
+        Y_t  = predicted mean at time t (after jump)
+        Y_t- = predicted mean just before time t
+        W_t  = raw network output for variance (unconstrained)
+        V_t  = predicted variance = W_t² (non-negative)
+        Z_t  = empirical variance target = (X_t - Y_t)²
+
+    Mean Loss (moment 0):
+        L_mean = (√||X_t - Y_t||² + √||X_t - Y_t-||²)²
+               = (||X_t - Y_t|| + ||X_t - Y_t-||)²
+        
+        Jump term:      X_t - Y_t   (how well we match observations)
+        Continuity:     X_t - Y_t-  (smoothness before jump)
+
+    Variance Loss (moment 1):
+        L_var = (√||Z_t - V_t||² + √||Z_t- - V_t-||²)²
+              = (||Z_t - V_t|| + ||Z_t- - V_t-||)²
+        
+        where Z_t = (X_t - Y_t_detached)² is the empirical variance target
+        
+        Jump term:      Z_t - V_t   (match empirical variance after jump)
+        Continuity:     Z_t- - V_t- (variance smoothness before jump)
+        
+        Non-negativity enforced by V_t = W_t²
 
     Args:
         batch_times: List of observation time tensors for each trajectory
-        batch_values: List of observation value tensors (true X values)
-        preds: Model predictions at observation times (after jump)
-        preds_before: Model predictions just before observation times
+        batch_values: List of observation value tensors (X values)
+        preds: Model predictions at observation times (Y_t, W_t after jump)
+        preds_before: Model predictions before observation times (Y_t-, W_t- before jump)
         ignore_first_continuity: If True, no continuity penalty at t=0 (default: False)
         moment_weights: Weights for each moment's loss [mean_weight, var_weight, ...]
-        weight: Balance between jump (weight) and continuity (1-weight) terms (default: 0.5)
         eps: Small constant for numerical stability in square roots (default: 1e-10)
     
     Returns:
@@ -256,31 +274,33 @@ def nj_ode_loss(
 
     trajectory_losses = []
 
-    for true_values, pred_after_jump, pred_before_jump in zip(batch_values, preds, preds_before):
-        # true_values: (n_observations, dimension)
-        # pred_after_jump, pred_before_jump: (n_observations, dimension, num_moments)
-        n_obs, d_x, num_moments = pred_after_jump.shape
+    for X, Y, Y_before in zip(batch_values, preds, preds_before):
+        # X: (n_observations, dimension) - true observations X_t
+        # Y, Y_before: (n_observations, dimension, num_moments) - predictions
+        n_obs, d_x, num_moments = Y.shape
 
         total_loss_for_trajectory = 0.0
 
         # ========== MOMENT 0: Mean Prediction ==========
-        pred_mean_after = pred_after_jump[:, :, 0]     # Y_t:  predictions after jump
-        pred_mean_before = pred_before_jump[:, :, 0]   # Y_t-: predictions before jump
+        # Extract mean predictions: Y_t (after jump) and Y_t- (before jump)
+        Y_mean = Y[:, :, 0]              # Y_t:  mean prediction after jump
+        Y_mean_before = Y_before[:, :, 0]  # Y_t-: mean prediction before jump
 
-        # Jump term: || X_t - Y_t ||²  (how well we match observations)
-        squared_error_after_jump = torch.sum((true_values - pred_mean_after) ** 2, dim=1)  # (n_obs,)
+        # Mean loss: L_mean = (||X_t - Y_t|| + ||X_t - Y_t-||)²
+        # Jump term: ||X_t - Y_t||²
+        jump_error_sq = torch.sum((X - Y_mean) ** 2, dim=1)  # (n_obs,)
         
-        # Continuity term: || Y_t- - X_t ||²  (smoothness before jump)
-        squared_error_before_jump = torch.sum((pred_mean_before - true_values) ** 2, dim=1)  # (n_obs,)
+        # Continuity term: ||X_t - Y_t-||²
+        cont_error_sq = torch.sum((X - Y_mean_before) ** 2, dim=1)  # (n_obs,)
 
         # Ignore continuity at first observation (no "before" exists)
         if ignore_first_continuity and n_obs > 0:
-            squared_error_before_jump = squared_error_before_jump.clone()
-            squared_error_before_jump[0] = 0.0
+            cont_error_sq = cont_error_sq.clone()
+            cont_error_sq[0] = 0.0
 
-        # Combine with weights: inner = (2w*sqrt(jump) + 2(1-w)*sqrt(continuity))²
-        mean_loss_per_obs = (torch.sqrt(squared_error_after_jump + eps) + torch.sqrt(squared_error_before_jump + eps)) ** 2  # (n_obs,)
-        mean_loss = mean_loss_per_obs.mean()  # Average over observations
+        # Combine: (√jump + √cont)²
+        mean_loss_per_obs = (torch.sqrt(jump_error_sq + eps) + torch.sqrt(cont_error_sq + eps)) ** 2
+        mean_loss = mean_loss_per_obs.mean()
 
         # Apply moment weight for mean
         mean_weight = 1.0 if moment_weights is None else moment_weights[0]
@@ -288,34 +308,36 @@ def nj_ode_loss(
 
         # ========== MOMENT 1: Variance Prediction (if learning 2+ moments) ==========
         if num_moments > 1:
-            pred_var_raw_after = pred_after_jump[:, :, 1]    # W_t:  raw variance output after jump
-            pred_var_raw_before = pred_before_jump[:, :, 1]  # W_t-: raw variance output before jump
+            # Extract raw variance outputs: W_t and W_t-
+            W = Y[:, :, 1]              # W_t:  raw variance output after jump
+            W_before = Y_before[:, :, 1]  # W_t-: raw variance output before jump
 
-            # Actual variance predictions (squared to ensure non-negativity)
-            pred_variance_after = pred_var_raw_after ** 2    # V_t  = W_t²
-            pred_variance_before = pred_var_raw_before ** 2  # V_t- = W_t-²
+            # Compute actual variance predictions: V_t = W_t² (ensures non-negativity)
+            V = W ** 2              # V_t  = W_t²  ≥ 0
+            V_before = W_before ** 2  # V_t- = W_t-² ≥ 0
 
-            # True variance target: (X - mean_prediction)²
+            # Compute empirical variance targets: Z_t = (X_t - Y_t)²
             # Detach mean predictions so variance loss doesn't affect mean learning
-            pred_mean_after_detached = pred_mean_after.detach()
-            pred_mean_before_detached = pred_mean_before.detach()
+            Y_mean_detached = Y_mean.detach()
+            Y_mean_before_detached = Y_mean_before.detach()
 
-            true_variance_after = (true_values - pred_mean_after_detached) ** 2    # (n_obs, d_x)
-            true_variance_before = (true_values - pred_mean_before_detached) ** 2  # (n_obs, d_x)
+            Z = (X - Y_mean_detached) ** 2              # Z_t  = (X_t - Y_t)²
+            Z_before = (X - Y_mean_before_detached) ** 2  # Z_t- = (X_t - Y_t-)²
 
-            # Jump term for variance: || true_var - predicted_var ||²
-            var_squared_error_after = torch.sum((true_variance_after - pred_variance_after) ** 2, dim=1)  # (n_obs,)
+            # Variance loss: L_var = (||Z_t - V_t|| + ||Z_t- - V_t-||)²
+            # Jump term: ||Z_t - V_t||²
+            var_jump_error_sq = torch.sum((Z - V) ** 2, dim=1)  # (n_obs,)
             
-            # Continuity term for variance: || true_var- - predicted_var- ||²
-            var_squared_error_before = torch.sum((true_variance_before - pred_variance_before) ** 2, dim=1)  # (n_obs,)
+            # Continuity term: ||Z_t- - V_t-||²
+            var_cont_error_sq = torch.sum((Z_before - V_before) ** 2, dim=1)  # (n_obs,)
 
             # Ignore first observation continuity
             if ignore_first_continuity and n_obs > 0:
-                var_squared_error_before = var_squared_error_before.clone()
-                var_squared_error_before[0] = 0.0
+                var_cont_error_sq = var_cont_error_sq.clone()
+                var_cont_error_sq[0] = 0.0
 
-            # Combine with weights (same formula as mean)
-            variance_loss_per_obs = (torch.sqrt(var_squared_error_after + eps) + torch.sqrt(var_squared_error_before + eps)) ** 2
+            # Combine: (√jump + √cont)²
+            variance_loss_per_obs = (torch.sqrt(var_jump_error_sq + eps) + torch.sqrt(var_cont_error_sq + eps)) ** 2
             variance_loss = variance_loss_per_obs.mean()
 
             # Apply moment weight for variance (typically > 1 to emphasize variance learning)
