@@ -25,7 +25,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Heston Neural Jump ODE Experiment')
     
     # Model architecture
-    parser.add_argument('--hidden-dim', type=int, default=50, help='Hidden dimension size')
+    parser.add_argument('--hidden-dim', type=int, default=32, help='Hidden dimension size')
     parser.add_argument('--n-hidden-layers', type=int, default=1, help='Number of hidden layers')
     parser.add_argument('--activation', type=str, default='relu', 
                         choices=['relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'],

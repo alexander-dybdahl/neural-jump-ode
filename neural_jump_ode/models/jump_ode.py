@@ -226,7 +226,6 @@ def nj_ode_loss(
     preds_before,
     ignore_first_continuity: bool = False,
     moment_weights=None,
-    weight: float = 0.5,
     eps: float = 1e-10,
 ):
     """
@@ -261,7 +260,6 @@ def nj_ode_loss(
         # true_values: (n_observations, dimension)
         # pred_after_jump, pred_before_jump: (n_observations, dimension, num_moments)
         n_obs, d_x, num_moments = pred_after_jump.shape
-        device = true_values.device
 
         total_loss_for_trajectory = 0.0
 
@@ -281,10 +279,7 @@ def nj_ode_loss(
             squared_error_before_jump[0] = 0.0
 
         # Combine with weights: inner = (2w*sqrt(jump) + 2(1-w)*sqrt(continuity))²
-        jump_component = 2.0 * weight * torch.sqrt(squared_error_after_jump + eps)
-        continuity_component = 2.0 * (1.0 - weight) * torch.sqrt(squared_error_before_jump + eps)
-        
-        mean_loss_per_obs = (jump_component + continuity_component) ** 2  # (n_obs,)
+        mean_loss_per_obs = (torch.sqrt(squared_error_after_jump + eps) + torch.sqrt(squared_error_before_jump + eps)) ** 2  # (n_obs,)
         mean_loss = mean_loss_per_obs.mean()  # Average over observations
 
         # Apply moment weight for mean
@@ -320,10 +315,7 @@ def nj_ode_loss(
                 var_squared_error_before[0] = 0.0
 
             # Combine with weights (same formula as mean)
-            var_jump_component = 2.0 * weight * torch.sqrt(var_squared_error_after + eps)
-            var_continuity_component = 2.0 * (1.0 - weight) * torch.sqrt(var_squared_error_before + eps)
-            
-            variance_loss_per_obs = (var_jump_component + var_continuity_component) ** 2
+            variance_loss_per_obs = (torch.sqrt(var_squared_error_after + eps) + torch.sqrt(var_squared_error_before + eps)) ** 2
             variance_loss = variance_loss_per_obs.mean()
 
             # Apply moment weight for variance (typically > 1 to emphasize variance learning)
