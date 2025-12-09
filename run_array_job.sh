@@ -12,7 +12,7 @@
 # This will run 9 jobs in parallel (3 hidden_dims × 3 n_hidden_layers)
 
 # Load modules
-module load gcc/8.2.0 python_gpu/3.11.2 eth_proxy
+module load gcc/13.2.0 python/3.11.6
 
 # Create logs directory if it doesn't exist
 mkdir -p logs

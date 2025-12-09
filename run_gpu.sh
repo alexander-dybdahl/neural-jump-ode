@@ -10,7 +10,7 @@
 #SBATCH --gres=gpumem:8g
 
 # Load modules for GPU
-module load gcc/8.2.0 python_gpu/3.11.2 cuda/11.8.0 eth_proxy
+module load gcc/13.2.0 python/3.11.6_cuda
 
 # Create logs directory if it doesn't exist
 mkdir -p logs

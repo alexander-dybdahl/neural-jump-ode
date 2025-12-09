@@ -5,7 +5,11 @@
 echo "=== Setting up Neural Jump ODE on Euler ==="
 
 # Load modules
-module load gcc/8.2.0 python_gpu/3.11.2 eth_proxy
+echo "Loading modules..."
+module load gcc/13.2.0 python/3.11.6
+
+# Show loaded modules
+module list
 
 # Create necessary directories
 mkdir -p logs
