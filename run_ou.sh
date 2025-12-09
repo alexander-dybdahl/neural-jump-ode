@@ -21,8 +21,8 @@ source venv/bin/activate
 # Run experiment
 echo "Running Ornstein-Uhlenbeck experiment..."
 python experiments/experiment_ou.py \
-    --n-train 10000 \
-    --n-val 2000 \
+    --n-train 1000 \
+    --n-val 200 \
     --n-epochs 200 \
     --hidden-dim 50 \
     --n-hidden-layers 1 \

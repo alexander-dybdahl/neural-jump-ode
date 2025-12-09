@@ -22,8 +22,8 @@ source venv/bin/activate
 # Run experiment with GPU
 echo "Running experiment on GPU..."
 python experiments/experiment_heston.py \
-    --n-train 50000 \
-    --n-val 5000 \
+    --n-train 5000 \
+    --n-val 500 \
     --n-epochs 200 \
     --hidden-dim 100 \
     --n-hidden-layers 2 \

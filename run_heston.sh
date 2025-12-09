@@ -29,8 +29,8 @@ fi
 # Run experiment with default parameters
 echo "Running Heston experiment..."
 python experiments/experiment_heston.py \
-    --n-train 10000 \
-    --n-val 2000 \
+    --n-train 1000 \
+    --n-val 200 \
     --n-epochs 200 \
     --hidden-dim 50 \
     --n-hidden-layers 1 \
