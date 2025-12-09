@@ -101,6 +101,7 @@ def plot_single_trajectory_with_condexp(
     model.eval()
     device = next(model.parameters()).device
     num_moments = getattr(model, 'num_moments', 1)
+    shared_network = getattr(model, 'shared_network', False)
     
     # We will build model_full by explicitly simulating the NJ-ODE on times_full
     model_full_mean = torch.zeros_like(times_full)
@@ -114,8 +115,12 @@ def plot_single_trajectory_with_condexp(
             T_next = obs_times[i + 1]
             x_i = obs_values[i].unsqueeze(0).unsqueeze(-1).to(device)  # (1, 1)
             
-            # Jump at T_i - handle multiple moments
-            h_list = [model.jump_nns[m](x_i) for m in range(num_moments)]
+            # Jump at T_i - handle multiple moments and shared/separate networks
+            if shared_network:
+                h = model.jump_nn(x_i)  # (1, d_h)
+                h_list = [h for _ in range(num_moments)]
+            else:
+                h_list = [model.jump_nns[m](x_i) for m in range(num_moments)]
             t_cur = T_i.to(device)
             
             # Indices of fine times in [T_i, T_next)
@@ -133,18 +138,31 @@ def plot_single_trajectory_with_condexp(
                     t_cur = t_new
                 
                 # Extract outputs for each moment
-                y_mean = model.output_nns[0](h_list[0])  # (1, 1)
-                model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
-                if num_moments > 1:
-                    y_w = model.output_nns[1](h_list[1])  # (1, 1) - raw W output
-                    y_var = y_w ** 2  # V = W² to get actual variance
-                    model_full_var[idx_interval[j]] = y_var.squeeze().cpu()        # Handle times after the last observation
+                if shared_network:
+                    y_all = model.output_nn(h_list[0])  # (1, num_moments)
+                    y_mean = y_all[:, 0:1]  # (1, 1)
+                    model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
+                    if num_moments > 1:
+                        y_w = y_all[:, 1:2]  # (1, 1) - raw W output
+                        y_var = y_w ** 2  # V = W² to get actual variance
+                        model_full_var[idx_interval[j]] = y_var.squeeze().cpu()
+                else:
+                    y_mean = model.output_nns[0](h_list[0])  # (1, 1)
+                    model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
+                    if num_moments > 1:
+                        y_w = model.output_nns[1](h_list[1])  # (1, 1) - raw W output
+                        y_var = y_w ** 2  # V = W² to get actual variance
+                        model_full_var[idx_interval[j]] = y_var.squeeze().cpu()        # Handle times after the last observation
         if len(obs_times) > 0:
             T_last = obs_times[-1]
             x_last = obs_values[-1].unsqueeze(0).unsqueeze(-1).to(device)  # (1, 1)
             
-            # Jump at T_last
-            h_list = [model.jump_nns[m](x_last) for m in range(num_moments)]
+            # Jump at T_last - handle shared/separate networks
+            if shared_network:
+                h = model.jump_nn(x_last)  # (1, d_h)
+                h_list = [h for _ in range(num_moments)]
+            else:
+                h_list = [model.jump_nns[m](x_last) for m in range(num_moments)]
             t_cur = T_last.to(device)
             
             # Indices of fine times > T_last
@@ -162,12 +180,21 @@ def plot_single_trajectory_with_condexp(
                     t_cur = t_new
                 
                 # Extract outputs for each moment
-                y_mean = model.output_nns[0](h_list[0])  # (1, 1)
-                model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
-                if num_moments > 1:
-                    y_w = model.output_nns[1](h_list[1])  # (1, 1) - raw W output
-                    y_var = y_w ** 2  # V = W² to get actual variance
-                    model_full_var[idx_interval[j]] = y_var.squeeze().cpu()
+                if shared_network:
+                    y_all = model.output_nn(h_list[0])  # (1, num_moments)
+                    y_mean = y_all[:, 0:1]  # (1, 1)
+                    model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
+                    if num_moments > 1:
+                        y_w = y_all[:, 1:2]  # (1, 1) - raw W output
+                        y_var = y_w ** 2  # V = W² to get actual variance
+                        model_full_var[idx_interval[j]] = y_var.squeeze().cpu()
+                else:
+                    y_mean = model.output_nns[0](h_list[0])  # (1, 1)
+                    model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
+                    if num_moments > 1:
+                        y_w = model.output_nns[1](h_list[1])  # (1, 1) - raw W output
+                        y_var = y_w ** 2  # V = W² to get actual variance
+                        model_full_var[idx_interval[j]] = y_var.squeeze().cpu()
     
     # Create the plot
     plt.figure(figsize=(12, 8))
