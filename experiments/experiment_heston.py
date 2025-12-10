@@ -153,7 +153,9 @@ def main():
         num_moments=config.get("num_moments", 1),
         n_hidden_layers=config.get("n_hidden_layers", 1),
         activation=config.get("activation", "relu"),
-        shared_network=config.get("shared_network", False)
+        shared_network=config.get("shared_network", False),
+        dropout_rate=config.get("dropout_rate", 0.1),
+        input_scaling=config.get("input_scaling", "identity")
     ).to(device)
     
     # Load the trained weights

@@ -369,7 +369,7 @@ def run_experiment(config: Dict, save_dir: str = "runs") -> Dict:
         activation=config.get("activation", "relu"),
         shared_network=config.get("shared_network", False),
         dropout_rate=config.get("dropout_rate", 0.1),
-        input_scaling=config.get("input_scaling", "tanh")
+        input_scaling=config.get("input_scaling", "identity")
     )
     
     # Optimizer

@@ -31,7 +31,7 @@ def parse_args():
                         choices=['relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'],
                         help='Activation function')
     parser.add_argument('--dropout-rate', type=float, default=0.1, help='Dropout rate for regularization')
-    parser.add_argument('--input-scaling', type=str, default='tanh',
+    parser.add_argument('--input-scaling', type=str, default='identity',
                         choices=['identity', 'tanh', 'sigmoid'],
                         help='Input scaling function for ODE network')
     parser.add_argument('--n-steps-between', type=int, default=5, help='Euler steps between observations')
@@ -147,7 +147,9 @@ def main():
         num_moments=config.get("num_moments", 1),
         n_hidden_layers=config.get("n_hidden_layers", 1),
         activation=config.get("activation", "relu"),
-        shared_network=config.get("shared_network", False)
+        shared_network=config.get("shared_network", False),
+        dropout_rate=config.get("dropout_rate", 0.1),
+        input_scaling=config.get("input_scaling", "identity")
     ).to(device)
     
     # Load the trained weights
