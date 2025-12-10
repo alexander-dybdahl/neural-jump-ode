@@ -64,7 +64,8 @@ def plot_single_trajectory_with_condexp(
     from ..simulation.data_generation import (
         generate_black_scholes, generate_ou, generate_heston,
         subsample_random_grid_points, condexp_black_scholes_on_grid,
-        condexp_ou_on_grid, condexp_heston_on_grid
+        condexp_ou_on_grid, condexp_heston_on_grid,
+        condvar_black_scholes_on_grid, condvar_ou_on_grid, condvar_heston_on_grid
     )
     
     # Generate one full path
@@ -96,6 +97,26 @@ def plot_single_trajectory_with_condexp(
         ce_full = condexp_heston_on_grid(
             times_full, X_full, obs_times, process_params.get("mu", 0.0)
         )
+    
+    # Build true conditional variance on full grid if model uses multiple moments
+    cv_full = None
+    num_moments_model = getattr(model, 'num_moments', 1)
+    if num_moments_model > 1:
+        if process_type == "black_scholes":
+            cv_full = condvar_black_scholes_on_grid(
+                times_full, X_full, obs_times, 
+                process_params.get("mu", 0.0), process_params.get("sigma", 0.2)
+            )
+        elif process_type == "ornstein_uhlenbeck":
+            cv_full = condvar_ou_on_grid(
+                times_full, X_full, obs_times,
+                process_params.get("theta", 1.0), process_params.get("sigma", 0.2)
+            )
+        elif process_type == "heston":
+            cv_full = condvar_heston_on_grid(
+                times_full, X_full, obs_times,
+                process_params.get("mu", 0.0), process_params.get("sigma", 0.2)
+            )
     
     # Build model prediction on full grid by simulating the NJ-ODE dynamics
     model.eval()
@@ -223,6 +244,17 @@ def plot_single_trajectory_with_condexp(
         
         plt.fill_between(times_np, lower_band, upper_band, 
                         color='red', alpha=0.2, label='Model ±2σ')
+        
+        # Add true conditional variance bands if available
+        if cv_full is not None:
+            cv_np = cv_full.numpy()
+            true_std_np = np.sqrt(np.maximum(cv_np, 0))  # Ensure non-negative
+            
+            true_upper_band = ce_np + 2 * true_std_np
+            true_lower_band = ce_np - 2 * true_std_np
+            
+            plt.fill_between(times_np, true_lower_band, true_upper_band,
+                            color='green', alpha=0.15, label='True ±2σ')
     
     plt.xlabel('Time')
     plt.ylabel('Value')

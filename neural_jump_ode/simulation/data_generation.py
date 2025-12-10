@@ -282,6 +282,72 @@ def condexp_heston_on_grid(times_full: torch.Tensor, X_full: torch.Tensor,
     return condexp_black_scholes_on_grid(times_full, X_full, obs_times, mu)
 
 
+def condvar_black_scholes_on_grid(times_full: torch.Tensor, X_full: torch.Tensor,
+                                  obs_times: torch.Tensor, mu: float, sigma: float) -> torch.Tensor:
+    """
+    Piecewise conditional variance for Black-Scholes:
+    For t in [T_i, T_{i+1}]:
+      Var[X_t | X_{T_i}] = X_{T_i}^2 * (exp(sigma^2 * (t - T_i)) - 1) * exp(2 * mu * (t - T_i)).
+    At observation times, variance is 0.
+    """
+    condvar = torch.zeros_like(times_full)
+    
+    for i, t in enumerate(times_full):
+        # Find the latest observation time <= t
+        obs_idx = torch.searchsorted(obs_times, t, right=True) - 1
+        obs_idx = torch.clamp(obs_idx, min=0, max=len(obs_times) - 1)
+        
+        T_i = obs_times[obs_idx]
+        
+        # If we are exactly at an observation time, variance is 0
+        if torch.isclose(t, T_i, atol=1e-6):
+            condvar[i] = 0.0
+        else:
+            X_i = X_full[torch.searchsorted(times_full, T_i)]
+            s = t - T_i
+            condvar[i] = X_i**2 * (torch.exp(sigma**2 * s) - 1) * torch.exp(2 * mu * s)
+    
+    return condvar
+
+
+def condvar_ou_on_grid(times_full: torch.Tensor, X_full: torch.Tensor,
+                       obs_times: torch.Tensor, theta: float, sigma: float) -> torch.Tensor:
+    """
+    Piecewise conditional variance for Ornstein-Uhlenbeck:
+    For t in [T_i, T_{i+1}]:
+      Var[X_t | X_{T_i}] = sigma^2 / (2 * theta) * (1 - exp(-2 * theta * (t - T_i))).
+    At observation times, variance is 0.
+    """
+    condvar = torch.zeros_like(times_full)
+    
+    for i, t in enumerate(times_full):
+        # Find the latest observation time <= t
+        obs_idx = torch.searchsorted(obs_times, t, right=True) - 1
+        obs_idx = torch.clamp(obs_idx, min=0, max=len(obs_times) - 1)
+        
+        T_i = obs_times[obs_idx]
+        
+        # If we are exactly at an observation time, variance is 0
+        if torch.isclose(t, T_i, atol=1e-6):
+            condvar[i] = 0.0
+        else:
+            s = t - T_i
+            condvar[i] = sigma**2 / (2 * theta) * (1 - torch.exp(-2 * theta * s))
+    
+    return condvar
+
+
+def condvar_heston_on_grid(times_full: torch.Tensor, X_full: torch.Tensor,
+                          obs_times: torch.Tensor, mu: float, sigma: float) -> torch.Tensor:
+    """
+    Piecewise conditional variance for Heston (using Black-Scholes approximation):
+    For t in [T_i, T_{i+1}]:
+      Var[X_t | X_{T_i}] ≈ X_{T_i}^2 * (exp(sigma^2 * (t - T_i)) - 1) * exp(2 * mu * (t - T_i)).
+    """
+    # For Heston, we use the same formula as Black-Scholes as an approximation
+    return condvar_black_scholes_on_grid(times_full, X_full, obs_times, mu, sigma)
+
+
 def bs_condexp_at_obs(
     batch_times: List[torch.Tensor],
     batch_values: List[torch.Tensor],

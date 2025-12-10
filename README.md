@@ -7,12 +7,13 @@ A PyTorch implementation of Neural Jump ODEs for modeling irregular time series 
 This project implements a neural network approach to modeling continuous-time processes observed at irregular intervals. The model consists of three main components:
 
 1. **Jump Network**: Maps observations to hidden states
-2. **ODE Function**: Models continuous evolution between observations 
+2. **ODE Function**: Models continuous evolution between observations
 3. **Output Network**: Maps hidden states to predictions
 
 The implementation focuses on three key stochastic processes:
+
 - **Black Scholes**: Geometric Brownian motion with constant volatility
-- **Ornstein-Uhlenbeck**: Mean-reverting process  
+- **Ornstein-Uhlenbeck**: Mean-reverting process
 - **Heston**: Stochastic volatility model with correlated Brownian motions
 
 ## Project Structure
@@ -96,6 +97,7 @@ python experiments/compare_experiments.py
 All experiments support the following arguments with their default values:
 
 #### Model Architecture
+
 ```bash
 --hidden-dim 32              # Hidden layer dimension
 --n-hidden-layers 1          # Number of hidden layers in each network
@@ -104,6 +106,7 @@ All experiments support the following arguments with their default values:
 ```
 
 #### Training Parameters
+
 ```bash
 --learning-rate 1e-3         # Adam learning rate
 --weight-decay 5e-4          # L2 regularization weight
@@ -115,6 +118,7 @@ All experiments support the following arguments with their default values:
 ```
 
 #### Moment Learning
+
 ```bash
 --num-moments 2              # Number of moments to learn (1=mean only, 2=mean+variance)
 --moment-weights 1.0 3.0     # Loss weights for each moment [mean_weight, var_weight]
@@ -122,6 +126,7 @@ All experiments support the following arguments with their default values:
 ```
 
 #### Data Generation
+
 ```bash
 --cache-data                 # Cache data (reuse paths each epoch, default: generate fresh)
 --n-train 1000               # Number of training trajectories
@@ -132,6 +137,7 @@ All experiments support the following arguments with their default values:
 ```
 
 #### Black-Scholes Specific (dX_t = μX_t dt + σX_t dW_t)
+
 ```bash
 --mu 0.1                     # Drift parameter
 --sigma 0.5                  # Volatility parameter
@@ -139,6 +145,7 @@ All experiments support the following arguments with their default values:
 ```
 
 #### Ornstein-Uhlenbeck Specific (dX_t = θ(μ - X_t) dt + σ dW_t)
+
 ```bash
 --theta 1.0                  # Mean reversion speed
 --mu 0.5                     # Long-term mean
@@ -147,6 +154,7 @@ All experiments support the following arguments with their default values:
 ```
 
 #### Heston Specific (dX_t = μX_t dt + √V_t X_t dW1_t, dV_t = κ(θ - V_t) dt + ξ√V_t dW2_t)
+
 ```bash
 --mu 0.5                     # Drift parameter
 --kappa 2.0                  # Volatility mean reversion speed
@@ -182,6 +190,7 @@ The Neural Jump ODE handles irregularly-sampled time series by modeling:
 - **Predictions** at any time via the Output Network
 
 The loss function uses L2 norms and encourages the model to:
+
 1. Predict the observed values after jumps: ||x_i - y_i||
 2. Maintain smooth evolution between observations: ||y_i - y_i^-||
 
@@ -190,30 +199,36 @@ The loss function uses L2 norms and encourages the model to:
 The project implements three key SDEs with grid-based simulation:
 
 ### Black Scholes
+
 ```
 dX_t = μ X_t dt + σ X_t dW_t
 ```
+
 - Simulated using log Euler scheme
 - ~10% of fixed grid points used as observations
 
-### Ornstein-Uhlenbeck  
+### Ornstein-Uhlenbeck
+
 ```
 dX_t = θ(μ - X_t) dt + σ dW_t
 ```
+
 - Mean-reverting process with Euler scheme
 - Analytical conditional expectation for validation
 
 ### Heston
+
 ```
 dX_t = μ X_t dt + √V_t X_t dW1_t
 dV_t = κ(θ - V_t) dt + ξ √V_t dW2_t
 ```
+
 - Stochastic volatility with correlated Brownian motions
 - Euler scheme with volatility clamping
 
 ## Features
 
-- **Multiple Moments**: Learn mean and variance (or higher moments) simultaneously
+- **Multiple Moments**: Learn mean and variance simultaneously
 - **Configurable Architecture**: Adjustable hidden layers, activation functions, and network dimensions
 - **Relative Loss Tracking**: Compares model performance to theoretical conditional expectations
 - **Training History Plots**: Track loss curves across epochs

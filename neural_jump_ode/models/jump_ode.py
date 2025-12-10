@@ -306,7 +306,7 @@ def nj_ode_loss(
         mean_weight = 1.0 if moment_weights is None else moment_weights[0]
         total_loss_for_trajectory = total_loss_for_trajectory + mean_weight * mean_loss
 
-        # ========== MOMENT 1: Variance Prediction (if learning 2+ moments) ==========
+        # ========== MOMENT 1: Variance Prediction (if learning 2 moments) ==========
         if num_moments > 1:
             # Extract raw variance outputs: W_t and W_t-
             W = Y[:, :, 1]              # W_t:  raw variance output after jump
