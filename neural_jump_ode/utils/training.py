@@ -25,6 +25,8 @@ class Trainer:
         
         self.train_losses = []
         self.val_losses = []
+        self.epoch_times = []
+        self.relative_losses = []
         
     def train_epoch(self, batch_times: List[torch.Tensor], 
                    batch_values: List[torch.Tensor], batch_size: Optional[int] = None,
@@ -135,8 +137,6 @@ class Trainer:
         """
         
         start_epoch = 0
-        epoch_times_history = []
-        relative_loss_history = []
         
         # Check for existing checkpoint
         if resume_from_checkpoint and save_path and Path(save_path).exists():
@@ -147,8 +147,8 @@ class Trainer:
                 self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
                 self.train_losses = checkpoint.get("train_losses", [])
                 self.val_losses = checkpoint.get("val_losses", [])
-                epoch_times_history = checkpoint.get("epoch_times", [])
-                relative_loss_history = checkpoint.get("relative_loss", [])
+                self.epoch_times = checkpoint.get("epoch_times", [])
+                self.relative_losses = checkpoint.get("relative_loss", [])
                 start_epoch = len(self.train_losses)
                 print(f"Resuming from epoch {start_epoch} (previous best loss: {min(self.train_losses):.6f})")
                 
@@ -158,21 +158,19 @@ class Trainer:
                     return {
                         "train_loss": self.train_losses,
                         "val_loss": self.val_losses,
-                        "epoch_times": epoch_times_history,
-                        "relative_loss": relative_loss_history,
+                        "epoch_times": self.epoch_times,
+                        "relative_loss": self.relative_losses,
                         "resumed_from_checkpoint": True
                     }
             except Exception as e:
                 print(f"Warning: Could not load checkpoint ({e}). Starting fresh training.")
                 start_epoch = 0
-                epoch_times_history = []
-                relative_loss_history = []
         
         history = {
             "train_loss": self.train_losses.copy(), 
             "val_loss": self.val_losses.copy(), 
-            "epoch_times": epoch_times_history.copy(),
-            "relative_loss": relative_loss_history.copy()
+            "epoch_times": self.epoch_times.copy(),
+            "relative_loss": self.relative_losses.copy()
         }
         
         # Prepare for relative loss computation if config is provided
@@ -243,13 +241,16 @@ class Trainer:
                         
                         relative_loss = (L_model - L_true) / max(L_true, 1e-8)  # Avoid division by zero
                         history["relative_loss"].append(relative_loss)
+                        self.relative_losses.append(relative_loss)
                         
                 except Exception as e:
                     print(f"Warning: Could not compute relative loss at epoch {epoch}: {e}")
                     history["relative_loss"].append(float('nan'))
+                    self.relative_losses.append(float('nan'))
             
             epoch_time = time.time() - start_time
             history["epoch_times"].append(epoch_time)
+            self.epoch_times.append(epoch_time)
             
             # Print progress and save model
             if epoch % print_every == 0 or epoch == start_epoch:
@@ -265,24 +266,23 @@ class Trainer:
                 
                 # Save model checkpoint each time we print
                 if save_path is not None:
-                    self.save_model(save_path, history["epoch_times"], history["relative_loss"])
+                    self.save_model(save_path)
         
         # Save model
         if save_path is not None:
-            self.save_model(save_path, history["epoch_times"], history["relative_loss"])
+            self.save_model(save_path)
             
         return history
     
-    def save_model(self, path: str, epoch_times: Optional[List[float]] = None, 
-                   relative_loss: Optional[List[float]] = None):
+    def save_model(self, path: str):
         """Save model state dict."""
         torch.save({
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "train_losses": self.train_losses,
             "val_losses": self.val_losses,
-            "epoch_times": epoch_times or [],
-            "relative_loss": relative_loss or []
+            "epoch_times": self.epoch_times,
+            "relative_loss": self.relative_losses
         }, path)
         
     def load_model(self, path: str):
@@ -292,6 +292,8 @@ class Trainer:
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.train_losses = checkpoint.get("train_losses", [])
         self.val_losses = checkpoint.get("val_losses", [])
+        self.epoch_times = checkpoint.get("epoch_times", [])
+        self.relative_losses = checkpoint.get("relative_loss", [])
 
 
 def create_data_loaders(process_type: str = "black_scholes", 
