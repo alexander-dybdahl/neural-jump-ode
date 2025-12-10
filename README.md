@@ -102,7 +102,7 @@ All experiments support the following arguments with their default values:
 --hidden-dim 32              # Hidden layer dimension
 --n-hidden-layers 1          # Number of hidden layers in each network
 --activation relu            # Activation function (relu/tanh/sigmoid/elu/leaky_relu/selu)
---dropout-rate 0.1           # Dropout probability for regularization
+--dropout-rate 0.0           # Dropout probability for regularization
 --input-scaling tanh         # Input scaling for ODE network (identity/tanh/sigmoid)
 --n-steps-between 5          # Euler steps between observations
 ```

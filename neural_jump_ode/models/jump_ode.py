@@ -80,7 +80,7 @@ class OutputNN(nn.Module):
 class NeuralJumpODE(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim,
                  dt_between_obs=None, n_steps_between=0, num_moments=1, n_hidden_layers=1, activation='relu',
-                 shared_network=False, dropout_rate=0.1, input_scaling='identity'):
+                 shared_network=False, dropout_rate=0.0, input_scaling='identity'):
         """
         dt_between_obs: size of Euler step for interpolation between obs
         n_steps_between: number of intermediate steps between two obs times
@@ -89,7 +89,7 @@ class NeuralJumpODE(nn.Module):
         n_hidden_layers: number of hidden layers in each neural network component (default=1)
         activation: activation function to use ('relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu')
         shared_network: if True, use single shared network for all moments; if False, separate networks (default=False)
-        dropout_rate: dropout probability for regularization (default=0.1)
+        dropout_rate: dropout probability for regularization (default=0.0)
         input_scaling: scaling function for ODE inputs ('identity', 'tanh', 'sigmoid'; default='identity')
         """
         super().__init__()

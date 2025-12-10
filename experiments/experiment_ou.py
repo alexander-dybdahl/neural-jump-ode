@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument('--activation', type=str, default='identity', 
                         choices=['relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'],
                         help='Activation function')
-    parser.add_argument('--dropout-rate', type=float, default=0.1, help='Dropout rate for regularization')
+    parser.add_argument('--dropout-rate', type=float, default=0.0, help='Dropout rate for regularization')
     parser.add_argument('--input-scaling', type=str, default='identity',
                         choices=['identity', 'tanh', 'sigmoid'],
                         help='Input scaling function for ODE network')
@@ -148,7 +148,7 @@ def main():
         n_hidden_layers=config.get("n_hidden_layers", 1),
         activation=config.get("activation", "relu"),
         shared_network=config.get("shared_network", False),
-        dropout_rate=config.get("dropout_rate", 0.1),
+        dropout_rate=config.get("dropout_rate", 0.0),
         input_scaling=config.get("input_scaling", "identity")
     ).to(device)
     
