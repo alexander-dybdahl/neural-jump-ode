@@ -82,13 +82,95 @@ loss = nj_ode_loss(batch_times, batch_values, preds, preds_before)
 ### Running Experiments
 
 ```bash
-# Run individual experiments
+# Run individual experiments with default parameters
 python experiments/experiment_black_scholes.py
 python experiments/experiment_ou.py
 python experiments/experiment_heston.py
 
 # Compare all experiments
 python experiments/compare_experiments.py
+```
+
+### Command-Line Arguments
+
+All experiments support the following arguments with their default values:
+
+#### Model Architecture
+```bash
+--hidden-dim 32              # Hidden layer dimension
+--n-hidden-layers 1          # Number of hidden layers in each network
+--activation relu            # Activation function (relu/tanh/sigmoid/elu/leaky_relu/selu)
+--n-steps-between 5          # Euler steps between observations
+```
+
+#### Training Parameters
+```bash
+--learning-rate 1e-3         # Adam learning rate
+--weight-decay 5e-4          # L2 regularization weight
+--n-epochs 200               # Number of training epochs
+--batch-size 128             # Mini-batch size
+--no-shuffle                 # Disable trajectory shuffling (default: shuffle enabled)
+--print-every 5              # Print progress every N epochs
+--device auto                # Device to use (auto/cpu/cuda)
+```
+
+#### Moment Learning
+```bash
+--num-moments 2              # Number of moments to learn (1=mean only, 2=mean+variance)
+--moment-weights 1.0 3.0     # Loss weights for each moment [mean_weight, var_weight]
+--shared-network             # Use single network for all moments (default: separate networks)
+```
+
+#### Data Generation
+```bash
+--cache-data                 # Cache data (reuse paths each epoch, default: generate fresh)
+--n-train 1000               # Number of training trajectories
+--n-val 200                  # Number of validation trajectories
+--obs-fraction 0.1           # Fraction of time points observed (e.g., 0.1 = 10%)
+--T 1.0                      # Time horizon
+--n-steps 100                # Number of time steps in simulation grid
+```
+
+#### Black-Scholes Specific (dX_t = μX_t dt + σX_t dW_t)
+```bash
+--mu 0.1                     # Drift parameter
+--sigma 0.5                  # Volatility parameter
+--x0 1.0                     # Initial value
+```
+
+#### Ornstein-Uhlenbeck Specific (dX_t = θ(μ - X_t) dt + σ dW_t)
+```bash
+--theta 1.0                  # Mean reversion speed
+--mu 0.5                     # Long-term mean
+--sigma 0.3                  # Volatility parameter
+--x0 0.0                     # Initial value
+```
+
+#### Heston Specific (dX_t = μX_t dt + √V_t X_t dW1_t, dV_t = κ(θ - V_t) dt + ξ√V_t dW2_t)
+```bash
+--mu 0.5                     # Drift parameter
+--kappa 2.0                  # Volatility mean reversion speed
+--theta 0.04                 # Long-term variance
+--xi 0.5                     # Volatility of volatility
+--rho -0.5                   # Correlation between Brownian motions
+--x0 1.0                     # Initial stock price
+--v0 0.04                    # Initial variance
+```
+
+#### Example Commands
+
+```bash
+# High volatility Black-Scholes with sparse observations
+python experiments/experiment_black_scholes.py \
+    --sigma 0.8 --obs-fraction 0.05 --n-epochs 100
+
+# Mean-reverting OU process with shared network
+python experiments/experiment_ou.py \
+    --theta 2.0 --shared-network --cache-data
+
+# Heston with strong correlation and custom moment weights
+python experiments/experiment_heston.py \
+    --rho -0.8 --moment-weights 1.0 5.0 --n-train 2000
 ```
 
 ## Model Architecture
