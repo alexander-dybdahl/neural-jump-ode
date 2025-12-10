@@ -27,16 +27,18 @@ source venv/bin/activate
 # Run experiment
 echo "Running Black-Scholes experiment..."
 python -u experiments/experiment_black_scholes.py \
-    --n-train 1000 \
-    --n-val 200 \
+    --n-train 10000 \
+    --n-val 2000 \
     --n-epochs 200 \
     --hidden-dim 50 \
     --n-hidden-layers 1 \
     --activation relu \
+    --dt-ode-step 0.01 \
     --learning-rate 1e-3 \
     --batch-size 128 \
     --print-every 10 \
     --device cpu \
+    --moment-weight 1.0 10.0 \
     --shared-network
 
 echo "Job completed!"

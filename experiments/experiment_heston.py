@@ -34,7 +34,7 @@ def parse_args():
     parser.add_argument('--input-scaling', type=str, default='identity',
                         choices=['identity', 'tanh', 'sigmoid'],
                         help='Input scaling function for ODE network')
-    parser.add_argument('--n-steps-between', type=int, default=5, help='Euler steps between observations')
+    parser.add_argument('--dt-ode-step', type=float, default=None, help='Fixed time step for ODE integration (if None, single step between observations)')
     
     # Training parameters
     parser.add_argument('--learning-rate', type=float, default=1e-3, help='Learning rate')
@@ -86,7 +86,7 @@ def main():
         "activation": args.activation,
         "dropout_rate": args.dropout_rate,
         "input_scaling": args.input_scaling,
-        "n_steps_between": args.n_steps_between,
+        "dt_ode_step": args.dt_ode_step,
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
         "n_epochs": args.n_epochs,
@@ -149,7 +149,7 @@ def main():
         input_dim=config["input_dim"],
         hidden_dim=config["hidden_dim"],
         output_dim=config["output_dim"],
-        n_steps_between=config.get("n_steps_between", 0),
+        dt_ode_step=config.get("dt_ode_step", None),
         num_moments=config.get("num_moments", 1),
         n_hidden_layers=config.get("n_hidden_layers", 1),
         activation=config.get("activation", "relu"),

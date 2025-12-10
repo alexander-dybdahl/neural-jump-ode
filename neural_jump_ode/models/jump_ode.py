@@ -79,12 +79,11 @@ class OutputNN(nn.Module):
 
 class NeuralJumpODE(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim,
-                 dt_between_obs=None, n_steps_between=0, num_moments=1, n_hidden_layers=1, activation='relu',
+                 dt_between_obs=None, dt_ode_step=None, num_moments=1, n_hidden_layers=1, activation='relu',
                  shared_network=False, dropout_rate=0.0, input_scaling='identity'):
         """
-        dt_between_obs: size of Euler step for interpolation between obs
-        n_steps_between: number of intermediate steps between two obs times
-                         if 0, only evaluate at obs times
+        dt_between_obs: (deprecated) size of Euler step for interpolation between obs
+        dt_ode_step: fixed time step size for ODE integration (if None, single step between observations)
         num_moments: number of moments to learn (1=mean only, 2=mean+variance, etc.)
         n_hidden_layers: number of hidden layers in each neural network component (default=1)
         activation: activation function to use ('relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu')
@@ -114,8 +113,8 @@ class NeuralJumpODE(nn.Module):
             self.ode_func = None
             self.output_nn = None
         
-        self.n_steps_between = n_steps_between
-        self.dt_between_obs = dt_between_obs
+        self.dt_ode_step = dt_ode_step
+        self.dt_between_obs = dt_between_obs  # deprecated
         self.output_dim = output_dim
 
     def euler_step(self, h_list, x_last, t_last, t_next):
@@ -184,15 +183,12 @@ class NeuralJumpODE(nn.Module):
             if i < n_obs - 1:
                 t_next = times[i + 1]
 
-                if self.n_steps_between <= 0:
+                if self.dt_ode_step is None:
                     # single step from t_i to t_next
                     h_next_minus_list = self.euler_step(h_list, x_i, t_i, t_next)
                 else:
-                    # multiple Euler substeps
-                    if self.dt_between_obs is None:
-                        dt = (t_next - t_i) / float(self.n_steps_between)
-                    else:
-                        dt = self.dt_between_obs
+                    # multiple Euler substeps with fixed dt
+                    dt = self.dt_ode_step
                     h_cur_list = h_list
                     t_cur = t_i
                     while t_cur + dt < t_next:
