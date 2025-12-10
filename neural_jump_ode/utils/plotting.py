@@ -62,9 +62,9 @@ def plot_single_trajectory_with_condexp(
          - observed values (dots)
     """
     from ..simulation.data_generation import (
-        generate_black_scholes, generate_ou, generate_heston,
+        generate_black_scholes, generate_ou, generate_heston, generate_hybrid_ou_bs,
         subsample_random_grid_points, condexp_black_scholes_on_grid,
-        condexp_ou_on_grid, condexp_heston_on_grid,
+        condexp_ou_on_grid, condexp_heston_on_grid, condexp_hybrid_on_grid,
         condvar_black_scholes_on_grid, condvar_ou_on_grid, condvar_heston_on_grid
     )
     
@@ -75,6 +75,8 @@ def plot_single_trajectory_with_condexp(
         times_full, X_full = generate_ou(seed=seed, **process_params)
     elif process_type == "heston":
         times_full, X_full, V_full = generate_heston(seed=seed, **process_params)
+    elif process_type == "hybrid_ou_bs":
+        times_full, X_full, switch_time_actual = generate_hybrid_ou_bs(seed=seed, **process_params)
     else:
         raise ValueError(f"Unknown process type: {process_type}")
     
@@ -96,6 +98,16 @@ def plot_single_trajectory_with_condexp(
     elif process_type == "heston":
         ce_full = condexp_heston_on_grid(
             times_full, X_full, obs_times, process_params.get("mu", 0.0)
+        )
+    elif process_type == "hybrid_ou_bs":
+        # For hybrid, use regime-specific conditional expectation
+        # switch_time_actual is the actual switch time used for this trajectory
+        ce_full = condexp_hybrid_on_grid(
+            times_full, X_full, obs_times,
+            switch_time=switch_time_actual,
+            theta_ou=process_params.get("theta_ou", 1.0),
+            mu_ou=process_params.get("mu_ou", 0.0),
+            mu_bs=process_params.get("mu_bs", 0.0)
         )
     
     # Build true conditional variance on full grid if model uses multiple moments
@@ -229,7 +241,8 @@ def plot_single_trajectory_with_condexp(
     # Convert to numpy for plotting
     times_np = times_full.numpy()
     X_np = X_full.numpy()
-    ce_np = ce_full.numpy()
+    # ce_full might already be numpy array (for hybrid process)
+    ce_np = ce_full if isinstance(ce_full, np.ndarray) else ce_full.numpy()
     model_mean_np = model_full_mean.numpy()
     obs_times_np = obs_times.numpy()
     obs_values_np = obs_values.numpy()

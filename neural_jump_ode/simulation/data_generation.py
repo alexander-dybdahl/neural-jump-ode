@@ -93,6 +93,75 @@ def generate_ou(
     return times, X
 
 
+def generate_hybrid_ou_bs(
+    theta_ou: float = 1.0,
+    mu_ou: float = 0.0,
+    sigma_ou: float = 0.3,
+    mu_bs: float = 0.0,
+    sigma_bs: float = 0.2,
+    T: float = 1.0,
+    n_steps: int = 100,
+    x0: float = 1.0,
+    switch_time: Optional[float] = None,
+    seed: Optional[int] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, float]:
+    """
+    Simulate a hybrid process: OU from [0, switch_time] and Black-Scholes from [switch_time, T].
+    
+    Args:
+        theta_ou: mean reversion speed for OU
+        mu_ou: long-term mean for OU
+        sigma_ou: volatility for OU
+        mu_bs: drift for Black-Scholes
+        sigma_bs: volatility for Black-Scholes
+        T: final time
+        n_steps: number of time steps
+        x0: initial value
+        switch_time: time to switch from OU to BS (if None, random in [0.2*T, 0.8*T])
+        seed: random seed
+    
+    Returns:
+        (times, X, actual_switch_time) where times and X have shape (n_steps + 1,)
+    """
+    if seed is not None:
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+    
+    # Determine switch time
+    if switch_time is None:
+        switch_time = np.random.uniform(0.2 * T, 0.8 * T)
+    
+    dt = T / n_steps
+    times = torch.linspace(0.0, T, n_steps + 1)
+    X = torch.zeros(n_steps + 1)
+    X[0] = x0
+    
+    # Find the index where we switch
+    switch_idx = int(switch_time / dt)
+    
+    # Phase 1: OU process [0, switch_time]
+    exp_decay = torch.exp(torch.tensor(-theta_ou * dt))
+    mean_reversion = mu_ou * (1 - exp_decay)
+    noise_factor_ou = sigma_ou * torch.sqrt((1 - torch.exp(torch.tensor(-2 * theta_ou * dt))) / (2 * theta_ou)) if theta_ou > 0 else sigma_ou * torch.sqrt(torch.tensor(dt))
+    
+    for i in range(min(switch_idx, n_steps)):
+        noise = noise_factor_ou * torch.randn(1).item()
+        X[i + 1] = X[i] * exp_decay + mean_reversion + noise
+    
+    # Phase 2: Black-Scholes [switch_time, T]
+    # Continue from the value at switch_time, using log-space dynamics
+    if switch_idx < n_steps:
+        logX = torch.log(X[switch_idx])
+        drift_term = (mu_bs - 0.5 * sigma_bs**2) * dt
+        
+        for i in range(switch_idx, n_steps):
+            dW = torch.randn(1).item() * np.sqrt(dt)
+            logX = logX + drift_term + sigma_bs * dW
+            X[i + 1] = torch.exp(logX)
+    
+    return times, X, switch_time
+
+
 def generate_heston(
     mu: float = 0.0,
     kappa: float = 2.0,
@@ -206,8 +275,10 @@ def create_trajectory_batch(n_trajectories: int, process_type: str = "black_scho
             times, values = generate_ou(seed=i, **process_kwargs)
         elif process_type == "heston":
             times, values, _ = generate_heston(seed=i, **process_kwargs)  # Discard V for now
+        elif process_type == "hybrid_ou_bs":
+            times, values, _ = generate_hybrid_ou_bs(seed=i, **process_kwargs)  # Discard switch_time for now
         else:
-            raise ValueError(f"Unknown process type: {process_type}. Supported: black_scholes, ornstein_uhlenbeck, heston")
+            raise ValueError(f"Unknown process type: {process_type}. Supported: black_scholes, ornstein_uhlenbeck, heston, hybrid_ou_bs")
         
         # Subsample grid points
         obs_times, obs_values = subsample_random_grid_points(
@@ -221,6 +292,127 @@ def create_trajectory_batch(n_trajectories: int, process_type: str = "black_scho
 
 
 # Conditional expectation functions for different processes
+
+def condexp_hybrid_on_grid(
+    times_full: torch.Tensor,
+    X_full: torch.Tensor,
+    obs_times: torch.Tensor,
+    switch_time: float,
+    theta_ou: float,
+    mu_ou: float,
+    mu_bs: float,
+) -> np.ndarray:
+    """
+    Build conditional expectation E[X_t | observations] on full grid for hybrid OU-BS process.
+    
+    The process switches from OU to BS at switch_time.
+    The conditional expectation evolves continuously, but dynamics change at the switch.
+    
+    Args:
+        times_full: full time grid
+        X_full: full trajectory (not used for prediction, just for shape)
+        obs_times: observation times
+        switch_time: time when process switches from OU to BS
+        theta_ou: OU mean reversion
+        mu_ou: OU long-term mean
+        mu_bs: BS drift
+    
+    Returns:
+        ce: conditional expectation on full grid (numpy array)
+    """
+    n = len(times_full)
+    ce = np.zeros(n)
+    
+    # Find observations and their indices
+    obs_indices = []
+    obs_values_dict = {}
+    for obs_t in obs_times:
+        idx = (torch.abs(times_full - obs_t)).argmin().item()
+        obs_indices.append(idx)
+        obs_values_dict[idx] = X_full[idx].item()
+    
+    obs_indices = sorted(obs_indices)
+    
+    # Find the index closest to switch_time
+    switch_idx = (torch.abs(times_full - switch_time)).argmin().item()
+    
+    # Process each interval between observations
+    for interval_idx in range(len(obs_indices)):
+        start_idx = obs_indices[interval_idx]
+        end_idx = obs_indices[interval_idx + 1] if interval_idx + 1 < len(obs_indices) else n
+        
+        # At observation point, CE equals observed value
+        ce[start_idx] = obs_values_dict[start_idx]
+        
+        # Fill in values between observations
+        for i in range(start_idx + 1, end_idx):
+            t_current = times_full[i].item()
+            
+            # Check if we cross the switch point in this interval
+            if start_idx < switch_idx <= i:
+                # We need to evolve through the switch point
+                # First: evolve from start to switch using OU
+                t_start = times_full[start_idx].item()
+                x_start = ce[start_idx]
+                t_switch = times_full[switch_idx].item()
+                dt_to_switch = t_switch - t_start
+                
+                exp_decay = np.exp(-theta_ou * dt_to_switch)
+                x_at_switch = x_start * exp_decay + mu_ou * (1 - exp_decay)
+                
+                # Second: evolve from switch to current time using BS
+                dt_from_switch = t_current - t_switch
+                ce[i] = x_at_switch * np.exp(mu_bs * dt_from_switch)
+            else:
+                # No regime change in this step
+                t_start = times_full[start_idx].item()
+                x_start = ce[start_idx]
+                dt = t_current - t_start
+                
+                if t_current < switch_time:
+                    # OU regime
+                    exp_decay = np.exp(-theta_ou * dt)
+                    ce[i] = x_start * exp_decay + mu_ou * (1 - exp_decay)
+                else:
+                    # BS regime (both start and current are after switch)
+                    ce[i] = x_start * np.exp(mu_bs * dt)
+    
+    # Handle points after last observation
+    if obs_indices:
+        last_obs_idx = obs_indices[-1]
+        
+        for i in range(last_obs_idx + 1, n):
+            t_current = times_full[i].item()
+            
+            # Check if we cross the switch point
+            if last_obs_idx < switch_idx <= i:
+                # Evolve through switch point
+                t_last = times_full[last_obs_idx].item()
+                x_last = ce[last_obs_idx]
+                t_switch = times_full[switch_idx].item()
+                dt_to_switch = t_switch - t_last
+                
+                exp_decay = np.exp(-theta_ou * dt_to_switch)
+                x_at_switch = x_last * exp_decay + mu_ou * (1 - exp_decay)
+                
+                dt_from_switch = t_current - t_switch
+                ce[i] = x_at_switch * np.exp(mu_bs * dt_from_switch)
+            else:
+                # No regime change
+                t_last = times_full[last_obs_idx].item()
+                x_last = ce[last_obs_idx]
+                dt = t_current - t_last
+                
+                if t_current < switch_time:
+                    # OU regime
+                    exp_decay = np.exp(-theta_ou * dt)
+                    ce[i] = x_last * exp_decay + mu_ou * (1 - exp_decay)
+                else:
+                    # BS regime
+                    ce[i] = x_last * np.exp(mu_bs * dt)
+    
+    return ce
+
 
 def condexp_black_scholes_on_grid(times_full: torch.Tensor, X_full: torch.Tensor, 
                                  obs_times: torch.Tensor, mu: float) -> torch.Tensor:
@@ -525,6 +717,105 @@ def heston_condvar_at_obs(
     return bs_condvar_at_obs(batch_times, batch_values, mu, sigma)
 
 
+def hybrid_condexp_at_obs(
+    batch_times: List[torch.Tensor],
+    batch_values: List[torch.Tensor],
+    switch_time: float,
+    theta_ou: float,
+    mu_ou: float,
+    mu_bs: float,
+) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    """
+    Compute conditional expectation for hybrid OU-BS process at observation points.
+    
+    For times before switch: use OU dynamics
+    For times after switch: use BS dynamics
+    """
+    y_true = []
+    y_before = []
+    
+    for times, values in zip(batch_times, batch_values):
+        n_obs = len(times)
+        
+        # Separate observations by regime
+        mask_ou = times < switch_time
+        mask_bs = times >= switch_time
+        
+        ce = torch.zeros_like(values)
+        ce_before = torch.zeros_like(values)
+        
+        # OU regime: use OU conditional expectation
+        if mask_ou.any():
+            times_ou = [times[mask_ou]]
+            values_ou = [values[mask_ou]]
+            ce_ou, ce_ou_before = ou_condexp_at_obs(times_ou, values_ou, theta_ou, mu_ou)
+            ce[mask_ou] = ce_ou[0]
+            ce_before[mask_ou] = ce_ou_before[0]
+        
+        # BS regime: use BS conditional expectation
+        if mask_bs.any():
+            times_bs = [times[mask_bs]]
+            values_bs = [values[mask_bs]]
+            ce_bs, ce_bs_before = bs_condexp_at_obs(times_bs, values_bs, mu_bs)
+            ce[mask_bs] = ce_bs[0]
+            ce_before[mask_bs] = ce_bs_before[0]
+        
+        y_true.append(ce)
+        y_before.append(ce_before)
+    
+    return y_true, y_before
+
+
+def hybrid_condvar_at_obs(
+    batch_times: List[torch.Tensor],
+    batch_values: List[torch.Tensor],
+    switch_time: float,
+    theta_ou: float,
+    sigma_ou: float,
+    mu_bs: float,
+    sigma_bs: float,
+) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    """
+    Compute conditional variance for hybrid OU-BS process at observation points.
+    
+    Approximation: use the appropriate variance formula based on current regime.
+    This is an approximation because it doesn't account for regime uncertainty.
+    """
+    var_true = []
+    var_before = []
+    
+    for times, values in zip(batch_times, batch_values):
+        n_obs = len(times)
+        
+        # Separate observations by regime
+        mask_ou = times < switch_time
+        mask_bs = times >= switch_time
+        
+        cv = torch.zeros_like(values)
+        cv_before = torch.zeros_like(values)
+        
+        # OU regime: use OU conditional variance
+        if mask_ou.any():
+            times_ou = [times[mask_ou]]
+            values_ou = [values[mask_ou]]
+            cv_ou, cv_ou_before = ou_condvar_at_obs(times_ou, values_ou, theta_ou, sigma_ou)
+            cv[mask_ou] = cv_ou[0]
+            cv_before[mask_ou] = cv_ou_before[0]
+        
+        # BS regime: use BS conditional variance
+        if mask_bs.any():
+            times_bs = [times[mask_bs]]
+            values_bs = [values[mask_bs]]
+            cv_bs, cv_bs_before = bs_condvar_at_obs(times_bs, values_bs, mu_bs, sigma_bs)
+            cv[mask_bs] = cv_bs[0]
+            cv_before[mask_bs] = cv_bs_before[0]
+        
+        var_true.append(cv)
+        var_before.append(cv_before)
+    
+    return var_true, var_before
+
+
 def get_conditional_moments_at_obs(
     batch_times: List[torch.Tensor],
     batch_values: List[torch.Tensor],
@@ -553,6 +844,25 @@ def get_conditional_moments_at_obs(
                                                        process_params.get("mu", 0.0))
         elif process_type == "heston":
             mean_true, mean_before = heston_condexp_at_obs([times], [values], process_params.get("mu", 0.0))
+        elif process_type == "hybrid_ou_bs":
+            # For hybrid with known switch time, use regime-specific formulas
+            # If switch_time is None (random), we can't compute true conditional moments
+            switch_time = process_params.get("switch_time")
+            if switch_time is None:
+                # Random switch times - return zeros (disable relative loss)
+                mean_true = [torch.zeros_like(values)]
+                mean_before = [torch.zeros_like(values)]
+            else:
+                # Fixed switch time - compute regime-specific conditional expectations
+                mean_true, mean_before = hybrid_condexp_at_obs(
+                    [times], [values],
+                    switch_time=switch_time,
+                    theta_ou=process_params.get("theta_ou", 1.0),
+                    mu_ou=process_params.get("mu_ou", 0.0),
+                    mu_bs=process_params.get("mu_bs", 0.0)
+                )
+        else:
+            raise ValueError(f"Unknown process type for conditional moments: {process_type}")
         
         moments[:, :, 0] = mean_true[0]
         moments_before[:, :, 0] = mean_before[0]
@@ -571,6 +881,23 @@ def get_conditional_moments_at_obs(
                 var_true, var_before = heston_condvar_at_obs([times], [values], 
                                                              process_params.get("mu", 0.0),
                                                              process_params.get("xi", 0.5))
+            elif process_type == "hybrid_ou_bs":
+                # For hybrid with known switch time, use regime-specific variance formulas
+                switch_time = process_params.get("switch_time")
+                if switch_time is None:
+                    # Random switch times - return zeros (disable relative loss)
+                    var_true = [torch.zeros_like(values)]
+                    var_before = [torch.zeros_like(values)]
+                else:
+                    # Fixed switch time - compute regime-specific conditional variances
+                    var_true, var_before = hybrid_condvar_at_obs(
+                        [times], [values],
+                        switch_time=switch_time,
+                        theta_ou=process_params.get("theta_ou", 1.0),
+                        sigma_ou=process_params.get("sigma_ou", 0.3),
+                        mu_bs=process_params.get("mu_bs", 0.0),
+                        sigma_bs=process_params.get("sigma_bs", 0.2)
+                    )
             
             moments[:, :, 1] = var_true[0]
             moments_before[:, :, 1] = var_before[0]

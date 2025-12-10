@@ -173,7 +173,7 @@ class Trainer:
         compute_relative_loss = config and "data" in config and "process_type" in config["data"]
         if compute_relative_loss:
             process_type = config["data"]["process_type"]
-            if process_type in ["black_scholes", "ornstein_uhlenbeck", "heston"]:
+            if process_type in ["black_scholes", "ornstein_uhlenbeck", "heston", "hybrid_ou_bs"]:
                 # Import conditional expectation functions
                 from ..simulation.data_generation import (
                     bs_condexp_at_obs, ou_condexp_at_obs, heston_condexp_at_obs
