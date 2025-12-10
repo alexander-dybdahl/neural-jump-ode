@@ -48,7 +48,7 @@ def parse_args():
     
     # Moment learning
     parser.add_argument('--num-moments', type=int, default=2, help='Number of moments to learn')
-    parser.add_argument('--moment-weights', type=float, nargs='+', default=[1.0, 3.0], 
+    parser.add_argument('--moment-weights', type=float, nargs='+', default=[1.0, 10.0], 
                         help='Weights for each moment loss')
     parser.add_argument('--shared-network', action='store_true', 
                         help='Use single shared network for all moments (default: separate networks)')

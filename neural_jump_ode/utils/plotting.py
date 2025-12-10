@@ -150,8 +150,11 @@ def plot_single_trajectory_with_condexp(
             idx_interval = torch.where(mask)[0]
             
             for j, t_target in enumerate(ts_interval):
-                # Integrate from t_cur to t_target using Euler (with n_steps_between substeps)
-                n_sub = max(1, model.n_steps_between)
+                # Integrate from t_cur to t_target using Euler
+                if model.dt_ode_step is None:
+                    n_sub = 1
+                else:
+                    n_sub = max(1, int((t_target - t_cur) / model.dt_ode_step))
                 dt = (t_target - t_cur) / float(n_sub)
                 for _ in range(n_sub):
                     t_new = t_cur + dt
@@ -193,7 +196,10 @@ def plot_single_trajectory_with_condexp(
             
             for j, t_target in enumerate(ts_interval):
                 # Integrate from t_cur to t_target
-                n_sub = max(1, model.n_steps_between)
+                if model.dt_ode_step is None:
+                    n_sub = 1
+                else:
+                    n_sub = max(1, int((t_target - t_cur) / model.dt_ode_step))
                 dt = (t_target - t_cur) / float(n_sub)
                 for _ in range(n_sub):
                     t_new = t_cur + dt
