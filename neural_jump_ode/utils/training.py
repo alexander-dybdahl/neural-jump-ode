@@ -135,6 +135,8 @@ class Trainer:
         """
         
         start_epoch = 0
+        epoch_times_history = []
+        relative_loss_history = []
         
         # Check for existing checkpoint
         if resume_from_checkpoint and save_path and Path(save_path).exists():
@@ -145,6 +147,8 @@ class Trainer:
                 self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
                 self.train_losses = checkpoint.get("train_losses", [])
                 self.val_losses = checkpoint.get("val_losses", [])
+                epoch_times_history = checkpoint.get("epoch_times", [])
+                relative_loss_history = checkpoint.get("relative_loss", [])
                 start_epoch = len(self.train_losses)
                 print(f"Resuming from epoch {start_epoch} (previous best loss: {min(self.train_losses):.6f})")
                 
@@ -154,19 +158,21 @@ class Trainer:
                     return {
                         "train_loss": self.train_losses,
                         "val_loss": self.val_losses,
-                        "epoch_times": checkpoint.get("epoch_times", []),
-                        "relative_loss": checkpoint.get("relative_loss", []),
+                        "epoch_times": epoch_times_history,
+                        "relative_loss": relative_loss_history,
                         "resumed_from_checkpoint": True
                     }
             except Exception as e:
                 print(f"Warning: Could not load checkpoint ({e}). Starting fresh training.")
                 start_epoch = 0
+                epoch_times_history = []
+                relative_loss_history = []
         
         history = {
             "train_loss": self.train_losses.copy(), 
             "val_loss": self.val_losses.copy(), 
-            "epoch_times": [],
-            "relative_loss": []
+            "epoch_times": epoch_times_history.copy(),
+            "relative_loss": relative_loss_history.copy()
         }
         
         # Prepare for relative loss computation if config is provided
