@@ -13,10 +13,10 @@ module load stack/2024-06 gcc/12.2.0
 module load python/3.11.6
 
 # Optimize PyTorch for multi-core CPU usage
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export NUMEXPR_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
+export MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
+export OPENBLAS_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
+export NUMEXPR_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}
 
 # Create logs directory if it doesn't exist
 mkdir -p logs
