@@ -31,7 +31,7 @@ def parse_args():
                         choices=['relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'],
                         help='Activation function')
     parser.add_argument('--dropout-rate', type=float, default=0.1, help='Dropout rate for regularization')
-    parser.add_argument('--input-scaling', type=str, default='tanh',
+    parser.add_argument('--input-scaling', type=str, default='identity',
                         choices=['identity', 'tanh', 'sigmoid'],
                         help='Input scaling function for ODE network')
     parser.add_argument('--n-steps-between', type=int, default=5, help='Euler steps between observations')
