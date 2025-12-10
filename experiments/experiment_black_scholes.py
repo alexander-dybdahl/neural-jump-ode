@@ -30,6 +30,10 @@ def parse_args():
     parser.add_argument('--activation', type=str, default='relu', 
                         choices=['relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'],
                         help='Activation function')
+    parser.add_argument('--dropout-rate', type=float, default=0.1, help='Dropout rate for regularization')
+    parser.add_argument('--input-scaling', type=str, default='tanh',
+                        choices=['identity', 'tanh', 'sigmoid'],
+                        help='Input scaling function for ODE network')
     parser.add_argument('--n-steps-between', type=int, default=5, help='Euler steps between observations')
     
     # Training parameters
@@ -55,8 +59,8 @@ def parse_args():
     parser.add_argument('--n-train', type=int, default=1000, help='Number of training trajectories')
     parser.add_argument('--n-val', type=int, default=200, help='Number of validation trajectories')
     parser.add_argument('--obs-fraction', type=float, default=0.1, help='Fraction of points observed')
-    parser.add_argument('--mu', type=float, default=0.5, help='Black Scholes drift parameter')
-    parser.add_argument('--sigma', type=float, default=0.2, help='Black Scholes volatility parameter')
+    parser.add_argument('--mu', type=float, default=0.1, help='Black Scholes drift parameter')
+    parser.add_argument('--sigma', type=float, default=0.5, help='Black Scholes volatility parameter')
     parser.add_argument('--T', type=float, default=1.0, help='Time horizon')
     parser.add_argument('--n-steps', type=int, default=100, help='Number of time steps')
     parser.add_argument('--x0', type=float, default=1.0, help='Initial value')
@@ -76,6 +80,8 @@ def main():
         "output_dim": 1,
         "n_hidden_layers": args.n_hidden_layers,
         "activation": args.activation,
+        "dropout_rate": args.dropout_rate,
+        "input_scaling": args.input_scaling,
         "n_steps_between": args.n_steps_between,
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,

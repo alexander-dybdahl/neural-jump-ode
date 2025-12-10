@@ -13,12 +13,12 @@ ACTIVATION_FUNCTIONS = {
 }
 
 class JumpNN(nn.Module):
-    def __init__(self, input_dim, hidden_dim, n_hidden_layers=1, activation='relu'):
+    def __init__(self, input_dim, hidden_dim, n_hidden_layers=1, activation='relu', dropout_rate=0.0):
         super().__init__()
         act_fn = ACTIVATION_FUNCTIONS.get(activation.lower(), nn.ReLU)
         layers = [nn.Linear(input_dim, hidden_dim), act_fn()]
         for _ in range(n_hidden_layers):
-            layers.extend([nn.Linear(hidden_dim, hidden_dim), act_fn()])
+            layers.extend([nn.Dropout(p=dropout_rate), nn.Linear(hidden_dim, hidden_dim), act_fn()])
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -30,33 +30,46 @@ class ODEFunc(nn.Module):
     """
     f_theta(h, x_last, t_last, dt_elapsed) -> dh/dt
     """
-    def __init__(self, hidden_dim, input_dim, n_hidden_layers=1, activation='relu'):
+    def __init__(self, hidden_dim, input_dim, n_hidden_layers=1, activation='relu', dropout_rate=0.0, input_scaling='tanh'):
         super().__init__()
         act_fn = ACTIVATION_FUNCTIONS.get(activation.lower(), nn.ReLU)
         layers = [nn.Linear(hidden_dim + input_dim + 2, hidden_dim), act_fn()]
         for _ in range(n_hidden_layers - 1):
-            layers.extend([nn.Linear(hidden_dim, hidden_dim), act_fn()])
-        layers.append(nn.Linear(hidden_dim, hidden_dim))
+            layers.extend([nn.Dropout(p=dropout_rate), nn.Linear(hidden_dim, hidden_dim), act_fn()])
+        layers.extend([nn.Dropout(p=dropout_rate), nn.Linear(hidden_dim, hidden_dim)])
         self.net = nn.Sequential(*layers)
+        
+        # Set input scaling function
+        if input_scaling in ['identity', 'none']:
+            self.scaling_fn = nn.Identity()
+        elif input_scaling == 'tanh':
+            self.scaling_fn = nn.Tanh()
+        elif input_scaling == 'sigmoid':
+            self.scaling_fn = nn.Sigmoid()
+        else:
+            raise ValueError(f"Unknown input_scaling: {input_scaling}. Use 'identity', 'tanh', or 'sigmoid'.")
 
     def forward(self, t, h, x_last, t_last):
         # t, t_last: scalar tensors
         # h: (batch, d_h)
         # x_last: (batch, d_x)
+        # Apply scaling to inputs
+        h_scaled = self.scaling_fn(h)
+        x_scaled = self.scaling_fn(x_last)
         t_elapsed = (t - t_last).expand_as(h[..., :1])
         t_rel = (t_last).expand_as(h[..., :1])
-        inp = torch.cat([h, x_last, t_rel, t_elapsed], dim=-1)
+        inp = torch.cat([h_scaled, x_scaled, t_rel, t_elapsed], dim=-1)
         dh = self.net(inp)
         return dh
 
 
 class OutputNN(nn.Module):
-    def __init__(self, hidden_dim, output_dim, n_hidden_layers=1, activation='relu'):
+    def __init__(self, hidden_dim, output_dim, n_hidden_layers=1, activation='relu', dropout_rate=0.0):
         super().__init__()
         act_fn = ACTIVATION_FUNCTIONS.get(activation.lower(), nn.ReLU)
         layers = []
         for _ in range(n_hidden_layers):
-            layers.extend([nn.Linear(hidden_dim, hidden_dim), act_fn()])
+            layers.extend([nn.Linear(hidden_dim, hidden_dim), act_fn(), nn.Dropout(p=dropout_rate)])
         layers.append(nn.Linear(hidden_dim, output_dim))
         self.net = nn.Sequential(*layers)
 
@@ -67,7 +80,7 @@ class OutputNN(nn.Module):
 class NeuralJumpODE(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim,
                  dt_between_obs=None, n_steps_between=0, num_moments=1, n_hidden_layers=1, activation='relu',
-                 shared_network=False):
+                 shared_network=False, dropout_rate=0.1, input_scaling='tanh'):
         """
         dt_between_obs: size of Euler step for interpolation between obs
         n_steps_between: number of intermediate steps between two obs times
@@ -76,6 +89,8 @@ class NeuralJumpODE(nn.Module):
         n_hidden_layers: number of hidden layers in each neural network component (default=1)
         activation: activation function to use ('relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu')
         shared_network: if True, use single shared network for all moments; if False, separate networks (default=False)
+        dropout_rate: dropout probability for regularization (default=0.1)
+        input_scaling: scaling function for ODE inputs ('identity', 'tanh', 'sigmoid'; default='tanh')
         """
         super().__init__()
         self.num_moments = num_moments
@@ -83,18 +98,18 @@ class NeuralJumpODE(nn.Module):
         
         if shared_network:
             # Single shared network for all moments
-            self.jump_nn = JumpNN(input_dim, hidden_dim, n_hidden_layers, activation)
-            self.ode_func = ODEFunc(hidden_dim, input_dim, n_hidden_layers, activation)
+            self.jump_nn = JumpNN(input_dim, hidden_dim, n_hidden_layers, activation, dropout_rate)
+            self.ode_func = ODEFunc(hidden_dim, input_dim, n_hidden_layers, activation, dropout_rate, input_scaling)
             # Output network needs to output all moments at once
-            self.output_nn = OutputNN(hidden_dim, output_dim * num_moments, n_hidden_layers, activation)
+            self.output_nn = OutputNN(hidden_dim, output_dim * num_moments, n_hidden_layers, activation, dropout_rate)
             self.jump_nns = None
             self.ode_funcs = None
             self.output_nns = None
         else:
             # Create separate networks for each moment
-            self.jump_nns = nn.ModuleList([JumpNN(input_dim, hidden_dim, n_hidden_layers, activation) for _ in range(num_moments)])
-            self.ode_funcs = nn.ModuleList([ODEFunc(hidden_dim, input_dim, n_hidden_layers, activation) for _ in range(num_moments)])
-            self.output_nns = nn.ModuleList([OutputNN(hidden_dim, output_dim, n_hidden_layers, activation) for _ in range(num_moments)])
+            self.jump_nns = nn.ModuleList([JumpNN(input_dim, hidden_dim, n_hidden_layers, activation, dropout_rate) for _ in range(num_moments)])
+            self.ode_funcs = nn.ModuleList([ODEFunc(hidden_dim, input_dim, n_hidden_layers, activation, dropout_rate, input_scaling) for _ in range(num_moments)])
+            self.output_nns = nn.ModuleList([OutputNN(hidden_dim, output_dim, n_hidden_layers, activation, dropout_rate) for _ in range(num_moments)])
             self.jump_nn = None
             self.ode_func = None
             self.output_nn = None

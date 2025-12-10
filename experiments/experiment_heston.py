@@ -30,6 +30,10 @@ def parse_args():
     parser.add_argument('--activation', type=str, default='relu', 
                         choices=['relu', 'tanh', 'sigmoid', 'elu', 'leaky_relu', 'selu'],
                         help='Activation function')
+    parser.add_argument('--dropout-rate', type=float, default=0.1, help='Dropout rate for regularization')
+    parser.add_argument('--input-scaling', type=str, default='tanh',
+                        choices=['identity', 'tanh', 'sigmoid'],
+                        help='Input scaling function for ODE network')
     parser.add_argument('--n-steps-between', type=int, default=5, help='Euler steps between observations')
     
     # Training parameters
@@ -80,6 +84,8 @@ def main():
         "output_dim": 1,
         "n_hidden_layers": args.n_hidden_layers,
         "activation": args.activation,
+        "dropout_rate": args.dropout_rate,
+        "input_scaling": args.input_scaling,
         "n_steps_between": args.n_steps_between,
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
