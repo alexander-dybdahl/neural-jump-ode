@@ -821,11 +821,15 @@ def get_conditional_moments_at_obs(
     batch_values: List[torch.Tensor],
     process_type: str,
     num_moments: int = 1,
+    variance_method: str = 'direct',
     **process_params
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
     """
     Get conditional expectations for multiple moments.
     Returns tensors of shape (n_i, d_x, num_moments).
+    
+    For variance_method='direct': returns (mean, variance)
+    For variance_method='second_moment': returns (mean, E[X²])
     """
     moments_true = []
     moments_true_before = []
@@ -899,8 +903,16 @@ def get_conditional_moments_at_obs(
                         sigma_bs=process_params.get("sigma_bs", 0.2)
                     )
             
-            moments[:, :, 1] = var_true[0]
-            moments_before[:, :, 1] = var_before[0]
+            if variance_method == 'direct':
+                # Direct method: use variance as second moment
+                moments[:, :, 1] = var_true[0]
+                moments_before[:, :, 1] = var_before[0]
+            elif variance_method == 'second_moment':
+                # Second moment method: compute E[X²] = Var + E[X]²
+                moments[:, :, 1] = var_true[0] + mean_true[0] ** 2
+                moments_before[:, :, 1] = var_before[0] + mean_before[0] ** 2
+            else:
+                raise ValueError(f"Unknown variance_method: {variance_method}")
         
         # Higher moments would be added here if needed
         

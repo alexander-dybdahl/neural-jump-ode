@@ -180,14 +180,24 @@ def plot_single_trajectory_with_condexp(
                     model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
                     if num_moments > 1:
                         y_w = y_all[:, 1:2]  # (1, 1) - raw W output
-                        y_var = y_w ** 2  # V = W² to get actual variance
+                        if model.variance_method == 'direct':
+                            y_var = y_w ** 2  # V = W² for direct method
+                        else:  # second_moment
+                            # W represents E[X²], compute Var = E[X²] - E[X]²
+                            y_var = y_w - y_mean ** 2
+                            y_var = torch.clamp(y_var, min=0.0)  # Clip negatives
                         model_full_var[idx_interval[j]] = y_var.squeeze().cpu()
                 else:
                     y_mean = model.output_nns[0](h_list[0])  # (1, 1)
                     model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
                     if num_moments > 1:
                         y_w = model.output_nns[1](h_list[1])  # (1, 1) - raw W output
-                        y_var = y_w ** 2  # V = W² to get actual variance
+                        if model.variance_method == 'direct':
+                            y_var = y_w ** 2  # V = W² for direct method
+                        else:  # second_moment
+                            # W represents E[X²], compute Var = E[X²] - E[X]²
+                            y_var = y_w - y_mean ** 2
+                            y_var = torch.clamp(y_var, min=0.0)  # Clip negatives
                         model_full_var[idx_interval[j]] = y_var.squeeze().cpu()        # Handle times after the last observation
         if len(obs_times) > 0:
             T_last = obs_times[-1]
@@ -225,14 +235,24 @@ def plot_single_trajectory_with_condexp(
                     model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
                     if num_moments > 1:
                         y_w = y_all[:, 1:2]  # (1, 1) - raw W output
-                        y_var = y_w ** 2  # V = W² to get actual variance
+                        if model.variance_method == 'direct':
+                            y_var = y_w ** 2  # V = W² for direct method
+                        else:  # second_moment
+                            # W represents E[X²], compute Var = E[X²] - E[X]²
+                            y_var = y_w - y_mean ** 2
+                            y_var = torch.clamp(y_var, min=0.0)  # Clip negatives
                         model_full_var[idx_interval[j]] = y_var.squeeze().cpu()
                 else:
                     y_mean = model.output_nns[0](h_list[0])  # (1, 1)
                     model_full_mean[idx_interval[j]] = y_mean.squeeze().cpu()
                     if num_moments > 1:
                         y_w = model.output_nns[1](h_list[1])  # (1, 1) - raw W output
-                        y_var = y_w ** 2  # V = W² to get actual variance
+                        if model.variance_method == 'direct':
+                            y_var = y_w ** 2  # V = W² for direct method
+                        else:  # second_moment
+                            # W represents E[X²], compute Var = E[X²] - E[X]²
+                            y_var = y_w - y_mean ** 2
+                            y_var = torch.clamp(y_var, min=0.0)  # Clip negatives
                         model_full_var[idx_interval[j]] = y_var.squeeze().cpu()
     
     # Create the plot

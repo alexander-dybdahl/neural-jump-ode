@@ -34,6 +34,9 @@ def parse_args():
     parser.add_argument('--input-scaling', type=str, default='identity',
                         choices=['identity', 'tanh', 'sigmoid'],
                         help='Input scaling function for ODE network')
+    parser.add_argument('--variance-method', type=str, default='direct',
+                        choices=['direct', 'second_moment'],
+                        help='Variance prediction method: direct (predict W, variance=W^2) or second_moment (predict E[X^2], variance=E[X^2]-E[X]^2)')
     parser.add_argument('--dt-ode-step', type=float, default=None, help='Fixed time step for ODE integration (if None, single step between observations)')
     
     # Training parameters
@@ -82,6 +85,7 @@ def main():
         "activation": args.activation,
         "dropout_rate": args.dropout_rate,
         "input_scaling": args.input_scaling,
+        "variance_method": args.variance_method,
         "dt_ode_step": args.dt_ode_step,
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
@@ -147,7 +151,8 @@ def main():
         activation=config.get("activation", "relu"),
         shared_network=config.get("shared_network", False),
         dropout_rate=config.get("dropout_rate", 0.0),
-        input_scaling=config.get("input_scaling", "identity")
+        input_scaling=config.get("input_scaling", "identity"),
+        variance_method=config.get("variance_method", "direct")
     ).to(device)
     
     # Load the trained weights

@@ -80,7 +80,7 @@ class OutputNN(nn.Module):
 class NeuralJumpODE(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim,
                  dt_between_obs=None, dt_ode_step=None, num_moments=1, n_hidden_layers=1, activation='relu',
-                 shared_network=False, dropout_rate=0.0, input_scaling='identity'):
+                 shared_network=False, dropout_rate=0.0, input_scaling='identity', variance_method='direct'):
         """
         dt_between_obs: (deprecated) size of Euler step for interpolation between obs
         dt_ode_step: fixed time step size for ODE integration (if None, single step between observations)
@@ -90,10 +90,12 @@ class NeuralJumpODE(nn.Module):
         shared_network: if True, use single shared network for all moments; if False, separate networks (default=False)
         dropout_rate: dropout probability for regularization (default=0.0)
         input_scaling: scaling function for ODE inputs ('identity', 'tanh', 'sigmoid'; default='identity')
+        variance_method: method for variance learning ('direct' or 'second_moment')
         """
         super().__init__()
         self.num_moments = num_moments
         self.shared_network = shared_network
+        self.variance_method = variance_method
         
         if shared_network:
             # Single shared network for all moments
@@ -238,6 +240,7 @@ def nj_ode_loss(
     ignore_first_continuity: bool = False,
     moment_weights=None,
     eps: float = 1e-10,
+    variance_method: str = "direct",
 ):
     """
     Neural Jump ODE loss function for mean and variance prediction.
@@ -246,9 +249,9 @@ def nj_ode_loss(
         X_t  = true observation at time t
         Y_t  = predicted mean at time t (after jump)
         Y_t- = predicted mean just before time t
-        W_t  = raw network output for variance (unconstrained)
-        V_t  = predicted variance = W_t² (non-negative)
-        Z_t  = empirical variance target = (X_t - Y_t)²
+        W_t  = raw network output for variance/second moment (interpretation depends on variance_method)
+        V_t  = predicted variance (computed differently based on variance_method)
+        Z_t  = loss target for variance/second moment (interpretation depends on variance_method)
 
     Mean Loss (moment 0):
         L_mean = (√||X_t - Y_t||² + √||X_t - Y_t-||²)²
@@ -257,17 +260,20 @@ def nj_ode_loss(
         Jump term:      X_t - Y_t   (how well we match observations)
         Continuity:     X_t - Y_t-  (smoothness before jump)
 
-    Variance Loss (moment 1):
-        L_var = (√||Z_t - V_t||² + √||Z_t- - V_t-||²)²
-              = (||Z_t - V_t|| + ||Z_t- - V_t-||)²
+    Variance Loss (moment 1) - Two Methods:
+    
+    METHOD 1: Direct Variance Prediction (variance_method='direct')
+        - Network outputs W_t (unconstrained)
+        - Loss function applies: V_t = W_t² (ensures non-negative variance)
+        - Z_t = (X_t - Y_t_detached)² (empirical variance target)
+        - L_var = (||Z_t - V_t|| + ||Z_t- - V_t-||)²
         
-        where Z_t = (X_t - Y_t_detached)² is the empirical variance target
+    METHOD 2: Second Moment Prediction (variance_method='second_moment')
+        - Network outputs W_t (unconstrained)
+        - Loss function applies: V_t = softplus(W_t) = E[X²] (ensures positivity)
+        - Z_t = X_t² (empirical second moment target)
+        - L_var = (||X_t² - E[X²]|| + ||X_t² - E[X²]_-||)²
         
-        Jump term:      Z_t - V_t   (match empirical variance after jump)
-        Continuity:     Z_t- - V_t- (variance smoothness before jump)
-        
-        Non-negativity enforced by V_t = W_t²
-
     Args:
         batch_times: List of observation time tensors for each trajectory
         batch_values: List of observation value tensors (X values)
@@ -276,6 +282,7 @@ def nj_ode_loss(
         ignore_first_continuity: If True, no continuity penalty at t=0 (default: False)
         moment_weights: Weights for each moment's loss [mean_weight, var_weight, ...]
         eps: Small constant for numerical stability in square roots (default: 1e-10)
+        variance_method: 'direct' or 'second_moment' - determines loss target interpretation
     
     Returns:
         Average loss across all trajectories in the batch
@@ -319,23 +326,38 @@ def nj_ode_loss(
 
         # ========== MOMENT 1: Variance Prediction (if learning 2 moments) ==========
         if num_moments > 1:
-            # Extract raw variance outputs: W_t and W_t-
-            W = Y[:, :, 1]              # W_t:  raw variance output after jump
-            W_before = Y_before[:, :, 1]  # W_t-: raw variance output before jump
+            # Extract raw network outputs: W_t and W_t-
+            W = Y[:, :, 1]              # Raw output after jump
+            W_before = Y_before[:, :, 1]  # Raw output before jump
 
-            # Compute actual variance predictions: V_t = W_t² (ensures non-negativity)
-            V = W ** 2              # V_t  = W_t²  ≥ 0
-            V_before = W_before ** 2  # V_t- = W_t-² ≥ 0
-
-            # Compute empirical variance targets: Z_t = (X_t - Y_t)²
-            # Detach mean predictions so variance loss doesn't affect mean learning
-            Y_mean_detached = Y_mean.detach()
-            Y_mean_before_detached = Y_mean_before.detach()
-
-            Z = (X - Y_mean_detached) ** 2              # Z_t  = (X_t - Y_t)²
-            Z_before = (X - Y_mean_before_detached) ** 2  # Z_t- = (X_t - Y_t-)²
+            if variance_method == "direct":
+                # Direct method: Apply W² to get variance, compare with empirical variance
+                # Transform: V_t = W_t² (ensures non-negative variance)
+                V = W ** 2
+                V_before = W_before ** 2
+                
+                # Z_t = (X_t - Y_t)² (empirical variance target)
+                Y_mean_detached = Y_mean.detach()
+                Y_mean_before_detached = Y_mean_before.detach()
+                
+                Z = (X - Y_mean_detached) ** 2              # Z_t  = (X_t - Y_t)²
+                Z_before = (X - Y_mean_before_detached) ** 2  # Z_t- = (X_t - Y_t-)²
+                
+            elif variance_method == "second_moment":
+                # Second moment method: Learn E[X²] directly, compare with X²
+                # Network learns E[X²] naturally from positive targets
+                V = W
+                V_before = W_before
+                
+                Z = X ** 2                    # X_t²
+                Z_before = X ** 2             # X_t² (same for before)
+                
+            else:
+                raise ValueError(f"Unknown variance_method: {variance_method}")
 
             # Variance loss: L_var = (||Z_t - V_t|| + ||Z_t- - V_t-||)²
+            # Note: For direct method, V is variance and Z is (X-Y)²
+            #       For second_moment method, V is second moment M and Z is X²
             # Jump term: ||Z_t - V_t||²
             var_jump_error_sq = torch.sum((Z - V) ** 2, dim=1)  # (n_obs,)
             

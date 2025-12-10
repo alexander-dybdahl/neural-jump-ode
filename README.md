@@ -104,8 +104,13 @@ All experiments support the following arguments with their default values:
 --activation relu            # Activation function (relu/tanh/sigmoid/elu/leaky_relu/selu)
 --dropout-rate 0.0           # Dropout probability for regularization
 --input-scaling tanh         # Input scaling for ODE network (identity/tanh/sigmoid)
---n-steps-between 5          # Euler steps between observations
+--variance-method direct     # Variance prediction method (direct/second_moment)
+--dt-ode-step 0.01           # Fixed time step for ODE integration (if None, single step between observations)
 ```
+
+**Variance Prediction Methods:**
+- `direct` (default): Network predicts W, variance computed as W². Simple and effective.
+- `second_moment`: Network predicts E[X²], variance computed as E[X²] - E[X]². Theoretically more principled but may be harder to train.
 
 #### Training Parameters
 
